@@ -74,7 +74,14 @@ function renderHome() {
       ${renderActivityPanel()}
       ${renderAlertsPanel()}
     </div>
+    ${renderCameraPanel()}
     ${renderDevicePanel()}`;
+}
+
+function renderCameraPanel() {
+  const links = liveData?.deviceLinks || [];
+  const cards = links.length ? links.map(link => `<article class="camera-card"><div class="camera-preview"><div class="camera-preview-icon">▣</div><strong>Camera not connected</strong><small>Enable camera on ${link.phone || 'this device'}</small><span class="camera-watermark">VEYRA · ADMIN VIEW</span></div><div class="camera-card-footer"><div><strong>${link.phone || 'Registered device'}</strong><small>One-way vehicle camera · permission required</small></div><button class="btn btn-sm btn-primary" data-camera-connect="${link.id}">Connect camera</button></div></article>`).join('') : '<div class="camera-empty"><span class="camera-preview-icon">▣</span><strong>No camera devices connected</strong><small>Pair a phone first, then connect its vehicle camera.</small></div>';
+  return `<section class="panel camera-panel"><div class="panel-header"><div><div class="panel-title">Vehicle cameras</div><div class="panel-subtitle">Authorized one-way live view · camera permission and active indicator required</div></div><span class="badge parked">Admin view only</span></div><div class="camera-grid">${cards}</div><div class="camera-notice">⌁ Camera use is visible on the device. The device camera cannot see the admin dashboard.</div></section>`;
 }
 
 function renderMapPanel() {
@@ -194,6 +201,7 @@ function renderView(view = state.view) {
   pageWrap.querySelectorAll('[data-nav]').forEach(el => el.addEventListener('click', () => renderView(el.dataset.nav)));
   pageWrap.querySelectorAll('[data-vehicle]').forEach(el => el.addEventListener('click', () => { state.selectedVehicle = Number(el.dataset.vehicle); showToast(`${vehicles[state.selectedVehicle].name} selected`); renderView('home'); }));
   pageWrap.querySelectorAll('[data-device-remove]').forEach(el => el.addEventListener('click', () => removeDevice(el.dataset.deviceRemove)));
+  pageWrap.querySelectorAll('[data-camera-connect]').forEach(el => el.addEventListener('click', () => openCameraConsentModal(el.dataset.cameraConnect)));
   pageWrap.querySelectorAll('[data-action]').forEach(el => el.addEventListener('click', () => handleAction(el.dataset.action)));
   requestAnimationFrame(refreshLiveMap);
 }
@@ -248,6 +256,10 @@ function downloadReport() {
   (liveData?.events || []).forEach(event => { const raw = event.raw || {}; rows.push([event.deviceLinkId || event.vehicleId || 'Mobile device', event.type || 'Position', new Date(event.receivedAt || Date.now()).toLocaleString(), raw.lat ?? '', raw.lng ?? '', raw.speed ?? '', raw.accuracy ?? '']); });
   const csv = rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\n');
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); const link = document.createElement('a'); link.href = url; link.download = `veyra-report-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); showToast('Report downloaded successfully');
+}
+
+function openCameraConsentModal(deviceId) {
+  openModal('Connect vehicle camera', `<p>This enables a one-way camera view for the authorized admin. The phone owner must grant camera permission, and Android will show a visible camera-active indicator while streaming.</p><div class="modal-list"><div class="modal-check"><span>✓</span><span>Admin can view the vehicle camera</span></div><div class="modal-check"><span>✓</span><span>Phone user cannot view the admin dashboard camera feed</span></div><div class="modal-check warning"><span>!</span><span>Camera permission and visible active status are required</span></div></div><div class="modal-actions"><button class="btn" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-save>Continue on device</button></div>`);
 }
 
 function openGeofenceModal() {
