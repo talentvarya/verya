@@ -15,6 +15,7 @@ const viewMeta = {
 let state = { view: 'home', workspace: 'home', selectedVehicle: 0 };
 let liveData = null;
 let liveMap = null;
+let liveMapViewKey = '';
 const pageWrap = document.getElementById('pageWrap');
 const toast = document.getElementById('toast');
 let toastTimer;
@@ -88,15 +89,19 @@ function refreshLiveMap() {
   liveMap.eachLayer(layer => { if (layer instanceof L.Marker) liveMap.removeLayer(layer); });
   points.forEach(point => {
     const moving = point.status === 'Moving';
-    const marker = L.marker([point.lat, point.lng], { icon: L.divIcon({ className: 'veyra-marker-wrap', html: `<span class="veyra-marker ${moving ? 'moving' : 'stopped'}"><span class="veyra-marker-icon">${point.icon}</span></span>`, iconSize: [36, 36], iconAnchor: [18, 18] }) }).addTo(liveMap);
+    const marker = L.marker([point.lat, point.lng], { icon: L.divIcon({ className: 'veyra-marker-wrap', html: `<span class="veyra-marker ${moving ? 'moving' : 'stopped'}"><span class="veyra-marker-icon">${point.icon}</span></span>`, iconSize: [46, 46], iconAnchor: [23, 23] }) }).addTo(liveMap);
     marker.bindPopup(`<strong>${point.name}</strong><br>${point.status} · ${point.speed}`);
   });
   const count = document.getElementById('mapDeviceCount'); if (count) count.textContent = `${points.length} live device${points.length === 1 ? '' : 's'}`;
   const sync = document.getElementById('mapSync'); if (sync) sync.textContent = points.length ? `Updated ${new Date().toLocaleTimeString()}` : 'Waiting for GPS data';
   const empty = document.getElementById('mapEmptyState'); if (empty) empty.hidden = Boolean(points.length);
-  if (points.length === 1) liveMap.setView([points[0].lat, points[0].lng], 13);
-  else if (points.length > 1) liveMap.fitBounds(L.latLngBounds(points.map(point => [point.lat, point.lng])), { padding: [35, 35], maxZoom: 15 });
-  setTimeout(() => liveMap?.invalidateSize(), 0);
+  const viewKey = points.map(point => point.id).sort().join('|');
+  if (viewKey !== liveMapViewKey) {
+    if (points.length === 1) liveMap.setView([points[0].lat, points[0].lng], 13);
+    else if (points.length > 1) liveMap.fitBounds(L.latLngBounds(points.map(point => [point.lat, point.lng])), { padding: [35, 35], maxZoom: 15 });
+    liveMapViewKey = viewKey;
+  }
+  setTimeout(() => liveMap?.invalidateSize({ pan: false }), 100);
 }
 
 function renderVehiclePanel() {
@@ -132,7 +137,7 @@ function renderDevicePanel() {
 
 function renderView(view = state.view) {
   state.view = view;
-  if (liveMap) { liveMap.remove(); liveMap = null; }
+  if (liveMap) { liveMap.remove(); liveMap = null; liveMapViewKey = ''; }
   const meta = viewMeta[view];
   document.getElementById('breadcrumbCurrent').textContent = meta.title.replace('Good morning, Arjun', 'Overview');
   document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
