@@ -26,8 +26,9 @@ const toast = document.getElementById('toast');
 let toastTimer;
 
 function icon(symbol, cls = '') { return `<span class="timeline-dot ${cls}">${symbol}</span>`; }
-function statCard(label, value, meta, glyph, color = '') { return `<article class="stat-card"><div class="stat-top"><span class="stat-label">${label}</span><span class="stat-icon ${color}">${glyph}</span></div><div class="stat-value">${value}</div><div class="stat-meta">${meta}</div></article>`; }
+function statCard(label, value, meta, glyph, color = '') { return `<article class="stat-card"><div class="stat-top"><span class="stat-label">${label}</span><span class="stat-icon ${color}">${glyph}</span></div><div class="stat-value" data-stat="${label}">${value}</div><div class="stat-meta">${meta}</div></article>`; }
 function pageHeading(meta, actions = '') { return `<div class="page-heading"><div><div class="eyebrow">${meta.eyebrow}</div><h1>${meta.title}</h1><p>${meta.subtitle}</p></div><div class="heading-actions">${actions}</div></div>`; }
+function refreshSummaryCards() { const summary = liveData?.summary || {}; const values = { 'Distance today': summary.distance || '0.00 km', 'Driving time': summary.driving || '0 h 00 m', 'Idle time': summary.idle || '0 m', 'Active alerts': String(summary.alerts || 0), 'Distance travelled': summary.distance || '0.00 km', 'Running time': summary.driving || '0 h 00 m' }; document.querySelectorAll('[data-stat]').forEach(card => { if (values[card.dataset.stat] !== undefined) card.textContent = values[card.dataset.stat]; }); }
 function carMarkerSvg() { return '<svg class="car-marker-svg" viewBox="0 0 48 64" aria-hidden="true"><path d="M14 7c1-3 4-5 7-5h6c3 0 6 2 7 5l5 13v32c0 4-3 7-7 7H16c-4 0-7-3-7-7V20l5-13Z" fill="currentColor" stroke="white" stroke-width="2" stroke-linejoin="round"/><path d="M13 20c2-5 5-8 11-8s9 3 11 8l-2 6H15l-2-6Z" fill="rgba(255,255,255,.48)"/><path d="M15 35h18" stroke="rgba(255,255,255,.8)" stroke-width="2" stroke-linecap="round"/><rect x="5" y="25" width="5" height="13" rx="2" fill="#293b45" stroke="white" stroke-width="1"/><rect x="38" y="25" width="5" height="13" rx="2" fill="#293b45" stroke="white" stroke-width="1"/><circle cx="14" cy="8" r="2" fill="#fff3a6"/><circle cx="34" cy="8" r="2" fill="#fff3a6"/><path d="M14 55h20" stroke="#ff8b8b" stroke-width="2" stroke-linecap="round"/></svg>'; }
 function bearingDegrees(from, to) { const rad = Math.PI / 180; const y = Math.sin((to.lng - from.lng) * rad) * Math.cos(to.lat * rad); const x = Math.cos(from.lat * rad) * Math.sin(to.lat * rad) - Math.sin(from.lat * rad) * Math.cos(to.lat * rad) * Math.cos((to.lng - from.lng) * rad); return Math.atan2(y, x) * 180 / Math.PI; }
 
@@ -49,7 +50,7 @@ async function loadBootstrap({ render = true } = {}) {
     document.querySelector('[data-view="vehicles"] .nav-count').textContent = vehicles.length;
     document.querySelector('.alert-count').textContent = (liveData.alerts || []).filter(alert => alert.state === 'Open').length;
     if (render) renderView(state.view);
-    else refreshLiveMap();
+    else { refreshLiveMap(); refreshSummaryCards(); }
     refreshCameraFeeds();
   } catch (error) { showToast('Could not load your fleet.'); }
 }
