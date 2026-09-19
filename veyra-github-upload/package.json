@@ -1,0 +1,7 @@
+{
+  "name": "veyra-vehicle-intelligence-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local full-stack MVP for the Veyra vehicle intelligence platform",
+  "scripts": { "start": "node server.js", "test": "node tests/api.test.js" }
+}

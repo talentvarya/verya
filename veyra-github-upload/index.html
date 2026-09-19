@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b1324" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <title>Veyra — Vehicle intelligence</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark"><span></span><span></span><span></span></div>
+        <div><strong>veyra</strong><small>vehicle intelligence</small></div>
+      </div>
+
+      <button class="workspace-switcher" id="workspaceSwitcher" aria-label="Switch workspace">
+        <span class="workspace-avatar">HO</span>
+        <span class="workspace-copy"><small>Workspace</small><strong id="workspaceName">Home garage</strong></span>
+        <span class="chevron">⌄</span>
+      </button>
+      <button class="workspace-role" id="roleButton" aria-label="Change demo role">Demo role: owner</button>
+
+      <div class="side-label">Workspace</div>
+      <nav class="primary-nav" id="primaryNav" aria-label="Primary navigation">
+        <button class="nav-item active" data-view="home"><span class="nav-icon">⌂</span><span>Overview</span></button>
+        <button class="nav-item" data-view="vehicles"><span class="nav-icon">▣</span><span>Vehicles</span><span class="nav-count">3</span></button>
+        <button class="nav-item" data-view="activity"><span class="nav-icon">⌁</span><span>Activity</span></button>
+        <button class="nav-item" data-view="security"><span class="nav-icon">◈</span><span>Security</span><span class="nav-count alert-count">2</span></button>
+        <button class="nav-item" data-view="trips"><span class="nav-icon">↗</span><span>Trips</span></button>
+        <button class="nav-item" data-view="maintenance"><span class="nav-icon">⌕</span><span>Maintenance</span><span class="nav-count soft-count">1</span></button>
+      </nav>
+
+      <div class="side-label side-label-lower">Manage</div>
+      <nav class="secondary-nav" aria-label="Management navigation">
+        <button class="nav-item" data-view="reports"><span class="nav-icon">▤</span><span>Reports</span></button>
+        <button class="nav-item" data-view="group"><span class="nav-icon">♧</span><span>Group & access</span></button>
+        <button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span><span>Settings</span></button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="upgrade-card">
+          <span class="upgrade-dot"></span>
+          <div><strong>Connected plan</strong><small>3 of 5 vehicles active</small></div>
+          <button aria-label="View plan">→</button>
+        </div>
+        <div class="user-row"><div class="user-avatar">AR</div><div><strong>Arjun Rao</strong><small>Private owner</small></div><button class="more-button" aria-label="More options">•••</button></div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobileMenu" aria-label="Open navigation">☰</button>
+        <div class="breadcrumb"><span id="breadcrumbRoot">Home garage</span><span class="slash">/</span><strong id="breadcrumbCurrent">Overview</strong></div>
+        <div class="top-actions">
+          <div class="live-pill"><span class="pulse"></span>All systems operational</div>
+          <button class="icon-button" id="helpButton" aria-label="Help">?</button>
+          <button class="icon-button notification-button" id="notificationButton" aria-label="Notifications"><span>♢</span><i></i></button>
+          <button class="icon-button" id="simulateButton" aria-label="Simulate GPS ping">↻</button>
+          <div class="top-avatar">AR</div>
+        </div>
+      </header>
+
+      <div class="page-wrap" id="pageWrap"></div>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="modalBackdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <button class="modal-close" id="modalClose" aria-label="Close">×</button>
+      <div id="modalContent"></div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast" role="status"><span class="toast-icon">✓</span><span id="toastMessage">Saved</span></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+  <script src="pwa.js"></script>
+</body>
+</html>

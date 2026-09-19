@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b1324" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <title>Veyra Mobile Device</title>
+  <link rel="stylesheet" href="device.css" />
+</head>
+<body>
+  <main class="device-shell">
+    <div class="device-brand"><span class="brand-mark">◈</span><span>veyra <small>mobile device mode</small></span></div>
+    <section class="device-card">
+      <div class="eyebrow">GPS device setup</div>
+      <h1>Use this phone as a tracker</h1>
+      <p class="intro">Register this phone, allow location access, and it will send live position events to your Veyra dashboard. Vehicle selection is optional.</p>
+      <div class="pairing-box">
+        <div class="pairing-title">Connect by mobile number</div>
+        <p>Enter the phone number you are using as the vehicle device. We will send an OTP before pairing it.</p>
+        <label>Mobile number<input id="phoneInput" type="tel" inputmode="tel" placeholder="+91 98765 43210" autocomplete="tel" /></label>
+        <button class="secondary full" id="requestOtpButton">Send OTP</button>
+        <div id="otpPanel" hidden><label>OTP code<input id="otpInput" inputmode="numeric" maxlength="6" placeholder="6-digit code" /></label><button class="primary full" id="verifyButton">Verify & pair device</button></div>
+        <div class="pairing-status" id="pairingStatus">Not paired yet.</div>
+      </div>
+      <label>Vehicle <small>(optional)</small><select id="vehicleSelect"><option>Loading vehicles…</option></select></label>
+      <div class="device-status" id="deviceStatus"><span class="status-dot"></span><span>Ready to connect</span></div>
+      <div class="device-actions"><button class="primary" id="startButton" disabled>Start location sharing</button><button class="secondary" id="testButton" disabled>Send test location</button></div>
+      <div class="last-event" id="lastEvent">No location sent yet.</div>
+    </section>
+    <section class="privacy-card"><strong>Privacy note</strong><p>Location is sent only while sharing is active. Stop sharing at any time. This is a local test device, not a background tracking service.</p></section>
+    <a href="/" class="back-link">← Back to dashboard</a>
+  </main>
+  <script src="device.js"></script>
+  <script src="pwa.js"></script>
+</body>
+</html>
