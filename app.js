@@ -28,8 +28,8 @@ let toastTimer;
 function icon(symbol, cls = '') { return `<span class="timeline-dot ${cls}">${symbol}</span>`; }
 function statCard(label, value, meta, glyph, color = '') { return `<article class="stat-card"><div class="stat-top"><span class="stat-label">${label}</span><span class="stat-icon ${color}">${glyph}</span></div><div class="stat-value">${value}</div><div class="stat-meta">${meta}</div></article>`; }
 function pageHeading(meta, actions = '') { return `<div class="page-heading"><div><div class="eyebrow">${meta.eyebrow}</div><h1>${meta.title}</h1><p>${meta.subtitle}</p></div><div class="heading-actions">${actions}</div></div>`; }
-function carMarkerSvg() { return '<svg class="car-marker-svg" viewBox="0 0 64 40" aria-hidden="true"><path d="M6 25h7l4-11h18l8 6h12c3 0 5 2 5 5v5H6z" fill="currentColor" stroke="white" stroke-width="2" stroke-linejoin="round"/><path d="M20 16h14l6 4H18z" fill="rgba(255,255,255,.48)"/><circle cx="18" cy="30" r="5" fill="#293b45" stroke="white" stroke-width="1.5"/><circle cx="48" cy="30" r="5" fill="#293b45" stroke="white" stroke-width="1.5"/><circle cx="57" cy="24" r="2" fill="#fff3a6"/><path d="M8 24h4" stroke="#ff8b8b" stroke-width="2" stroke-linecap="round"/></svg>'; }
-function bearingDegrees(from, to) { const rad = Math.PI / 180; const y = Math.sin((to.lng - from.lng) * rad) * Math.cos(to.lat * rad); const x = Math.cos(from.lat * rad) * Math.sin(to.lat * rad) - Math.sin(from.lat * rad) * Math.cos(to.lat * rad) * Math.cos((to.lng - from.lng) * rad); return Math.atan2(y, x) * 180 / Math.PI - 90; }
+function carMarkerSvg() { return '<svg class="car-marker-svg" viewBox="0 0 48 64" aria-hidden="true"><path d="M14 7c1-3 4-5 7-5h6c3 0 6 2 7 5l5 13v32c0 4-3 7-7 7H16c-4 0-7-3-7-7V20l5-13Z" fill="currentColor" stroke="white" stroke-width="2" stroke-linejoin="round"/><path d="M13 20c2-5 5-8 11-8s9 3 11 8l-2 6H15l-2-6Z" fill="rgba(255,255,255,.48)"/><path d="M15 35h18" stroke="rgba(255,255,255,.8)" stroke-width="2" stroke-linecap="round"/><rect x="5" y="25" width="5" height="13" rx="2" fill="#293b45" stroke="white" stroke-width="1"/><rect x="38" y="25" width="5" height="13" rx="2" fill="#293b45" stroke="white" stroke-width="1"/><circle cx="14" cy="8" r="2" fill="#fff3a6"/><circle cx="34" cy="8" r="2" fill="#fff3a6"/><path d="M14 55h20" stroke="#ff8b8b" stroke-width="2" stroke-linecap="round"/></svg>'; }
+function bearingDegrees(from, to) { const rad = Math.PI / 180; const y = Math.sin((to.lng - from.lng) * rad) * Math.cos(to.lat * rad); const x = Math.cos(from.lat * rad) * Math.sin(to.lat * rad) - Math.sin(from.lat * rad) * Math.cos(to.lat * rad) * Math.cos((to.lng - from.lng) * rad); return Math.atan2(y, x) * 180 / Math.PI; }
 
 async function loadBootstrap({ render = true } = {}) {
   try {
@@ -103,7 +103,7 @@ function refreshLiveMap() {
     const trailPoints = trailEvents.map(event => [Number(event.raw.lat), Number(event.raw.lng)]);
     if (trailPoints.length > 1) liveMarkerHeadings.set(point.id, bearingDegrees({ lat: trailPoints[trailPoints.length - 2][0], lng: trailPoints[trailPoints.length - 2][1] }, { lat: trailPoints[trailPoints.length - 1][0], lng: trailPoints[trailPoints.length - 1][1] }));
     const heading = liveMarkerHeadings.get(point.id) || 0;
-    const markerIcon = L.divIcon({ className: 'veyra-marker-wrap', html: `<span class="veyra-marker ${moving ? 'moving' : 'stopped'}" title="${point.name} · ${point.status}"><span class="veyra-marker-icon" style="--car-heading:${heading}deg">${carMarkerSvg()}</span></span>`, iconSize: [38, 38], iconAnchor: [19, 19] });
+    const markerIcon = L.divIcon({ className: 'veyra-marker-wrap', html: `<span class="veyra-marker ${moving ? 'moving' : 'stopped'}" title="${point.name} · ${point.status}"><span class="veyra-marker-icon" style="--car-heading:${heading}deg">${carMarkerSvg()}</span></span>`, iconSize: [46, 56], iconAnchor: [23, 28] });
     const marker = liveMarkers.get(point.id);
     const nextPosition = [point.lat, point.lng];
     if (marker) {
@@ -228,6 +228,7 @@ function handleAction(action) {
   if (action === 'ack') return acknowledgeAlert('A-101');
   if (action === 'geofence') return openGeofenceModal();
   if (action === 'invite') return openInviteModal();
+  if (action === 'report') return downloadReport();
   const actions = {
     share: ['Share vehicle access', '<p>Choose what another person can see. You can change this at any time.</p><div class="modal-list"><div class="modal-check"><span>✓</span><span>Live location and last seen</span></div><div class="modal-check"><span>✓</span><span>Activity and trip history</span></div><div class="modal-check warning"><span>—</span><span>Commands and security controls</span></div></div><div class="modal-actions"><button class="btn" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-save>Continue →</button></div>'],
     immobilize: ['Remote immobilization policy', '<p>This is an emergency capability. The command stays blocked until identity, connection, stationary state, and device acknowledgement all pass.</p><div class="modal-list"><div class="modal-check"><span>✓</span><span>Permission check · Owner</span></div><div class="modal-check"><span>✓</span><span>Current connection · Available</span></div><div class="modal-check warning"><span>!</span><span>Vehicle stationary check · Confirm at time of request</span></div></div><div class="modal-actions"><button class="btn" data-modal-close>Close</button><button class="btn btn-danger" data-modal-save>Begin verification</button></div>'],
@@ -240,6 +241,13 @@ function handleAction(action) {
   else if (action === 'zoomIn' || action === 'zoomOut') showToast(action === 'zoomIn' ? 'Map zoomed in' : 'Map zoomed out');
   else if (action === 'save') showToast('Workspace settings saved');
   else if (action === 'note' || action === 'policy' || action === 'report' || action === 'service' || action === 'invite' || action === 'geofence' || action === 'trip' || action === 'assign' || action === 'upload' || action === 'calendar') showToast('This workflow is ready for your next step');
+}
+
+function downloadReport() {
+  const rows = [['Device', 'Type', 'Received', 'Latitude', 'Longitude', 'Speed', 'Accuracy']];
+  (liveData?.events || []).forEach(event => { const raw = event.raw || {}; rows.push([event.deviceLinkId || event.vehicleId || 'Mobile device', event.type || 'Position', new Date(event.receivedAt || Date.now()).toLocaleString(), raw.lat ?? '', raw.lng ?? '', raw.speed ?? '', raw.accuracy ?? '']); });
+  const csv = rows.map(row => row.map(value => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); const link = document.createElement('a'); link.href = url; link.download = `veyra-report-${new Date().toISOString().slice(0, 10)}.csv`; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); showToast('Report downloaded successfully');
 }
 
 function openGeofenceModal() {
