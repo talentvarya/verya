@@ -27,6 +27,7 @@ let toastTimer;
 function icon(symbol, cls = '') { return `<span class="timeline-dot ${cls}">${symbol}</span>`; }
 function statCard(label, value, meta, glyph, color = '') { return `<article class="stat-card"><div class="stat-top"><span class="stat-label">${label}</span><span class="stat-icon ${color}">${glyph}</span></div><div class="stat-value">${value}</div><div class="stat-meta">${meta}</div></article>`; }
 function pageHeading(meta, actions = '') { return `<div class="page-heading"><div><div class="eyebrow">${meta.eyebrow}</div><h1>${meta.title}</h1><p>${meta.subtitle}</p></div><div class="heading-actions">${actions}</div></div>`; }
+function carMarkerSvg() { return '<svg class="car-marker-svg" viewBox="0 0 64 40" aria-hidden="true"><path d="M14 12 19 4h26l5 8 6 3c2 1 3 3 3 6v8H5v-8c0-3 1-5 4-6l5-3Z" fill="currentColor"/><rect x="21" y="8" width="22" height="8" rx="2" fill="rgba(255,255,255,.45)"/><circle cx="17" cy="29" r="5" fill="#17384b"/><circle cx="47" cy="29" r="5" fill="#17384b"/><path d="M9 21h46" stroke="rgba(255,255,255,.75)" stroke-width="2" stroke-linecap="round"/></svg>'; }
 
 async function loadBootstrap({ render = true } = {}) {
   try {
@@ -96,7 +97,7 @@ function refreshLiveMap() {
   liveTrailLayers = [];
   points.forEach(point => {
     const moving = point.status === 'Moving';
-    const markerIcon = L.divIcon({ className: 'veyra-marker-wrap', html: `<span class="veyra-marker ${moving ? 'moving' : 'stopped'}"><span class="veyra-marker-icon">${point.icon}</span><span class="veyra-marker-status">${moving ? 'LIVE' : 'STOP'}</span></span>`, iconSize: [52, 52], iconAnchor: [26, 26] });
+    const markerIcon = L.divIcon({ className: 'veyra-marker-wrap', html: `<span class="veyra-marker ${moving ? 'moving' : 'stopped'}" title="${point.name} · ${point.status}"><span class="veyra-marker-icon">${carMarkerSvg()}</span></span>`, iconSize: [38, 38], iconAnchor: [19, 19] });
     const marker = liveMarkers.get(point.id);
     const nextPosition = [point.lat, point.lng];
     if (marker) {
