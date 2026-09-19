@@ -56,6 +56,7 @@ function normalizeData(data) {
   data.geofences ||= [{ id: 'G-001', name: 'Home garage', type: 'Home', status: 'Active' }];
   data.events ||= [];
   data.deviceLinks ||= [];
+  refreshSummary(data);
   return data;
 }
 function readStore() { return normalizeData(JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'))); }
@@ -99,6 +100,36 @@ function maskPhone(phone) { return `${phone.slice(0, 3)}••••${phone.slic
 function createDeviceToken() { return crypto.randomBytes(32).toString('base64url'); }
 function hashDeviceToken(token) { return crypto.createHash('sha256').update(String(token || '')).digest('hex'); }
 function distanceMeters(a, b) { if (!a || !b) return 0; const rad = Math.PI / 180; const dLat = (Number(b.lat) - Number(a.lat)) * rad; const dLng = (Number(b.lng) - Number(a.lng)) * rad; const h = Math.sin(dLat / 2) ** 2 + Math.cos(Number(a.lat) * rad) * Math.cos(Number(b.lat) * rad) * Math.sin(dLng / 2) ** 2; return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)); }
+function formatDuration(milliseconds) { const minutes = Math.max(0, Math.floor(milliseconds / 60000)); return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} m`; }
+function refreshSummary(data) {
+  const since = Date.now() - 24 * 60 * 60 * 1000;
+  const samples = new Map();
+  (data.events || []).forEach(event => {
+    const raw = event.raw || {};
+    const lat = Number(raw.lat); const lng = Number(raw.lng); const receivedAt = new Date(event.receivedAt || 0).getTime();
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(receivedAt) || receivedAt < since) return;
+    const key = event.deviceLinkId || event.vehicleId || 'fleet';
+    if (!samples.has(key)) samples.set(key, []);
+    samples.get(key).push({ raw: { ...raw, lat, lng }, receivedAt });
+  });
+  let meters = 0; let drivingMilliseconds = 0; let idleMilliseconds = 0;
+  samples.forEach(items => {
+    items.sort((a, b) => a.receivedAt - b.receivedAt);
+    for (let index = 1; index < items.length; index += 1) {
+      const previous = items[index - 1]; const current = items[index]; const gap = current.receivedAt - previous.receivedAt;
+      if (gap <= 0 || gap > 10 * 60 * 1000) continue;
+      const step = distanceMeters(previous.raw, current.raw);
+      if (step <= 10000) meters += step;
+      const accuracy = Math.max(Number(previous.raw.accuracy || 20), Number(current.raw.accuracy || 20), 12);
+      const moving = Number(previous.raw.speed || 0) > 3 || step > accuracy;
+      const elapsed = Math.min(gap, 5 * 60 * 1000);
+      if (moving) drivingMilliseconds += elapsed;
+      else idleMilliseconds += elapsed;
+    }
+  });
+  const activeAlerts = (data.alerts || []).filter(alert => alert.state === 'Open').length;
+  data.summary = { distance: `${(meters / 1000).toFixed(2)} km`, driving: formatDuration(drivingMilliseconds), idle: `${Math.floor(idleMilliseconds / 60000)} m`, alerts: activeAlerts };
+}
 function allowRequest(key, limit, windowMs) {
   const now = Date.now(); const current = requestWindows.get(key) || { count: 0, startedAt: now };
   if (now - current.startedAt >= windowMs) { current.count = 0; current.startedAt = now; }
@@ -120,6 +151,7 @@ async function readData() {
   const seed = normalizeData(JSON.parse(JSON.stringify(initialData))); await writeData(seed); return seed;
 }
 async function writeData(data) {
+  refreshSummary(data);
   if (!SUPABASE_ENABLED) return writeStore(data);
   await supabaseRequest('app_state', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify([{ id: STATE_ID, payload: data }]) });
 }

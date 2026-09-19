@@ -51,7 +51,7 @@ async function loadBootstrap({ render = true } = {}) {
 }
 
 function renderHome() {
-  const summary = liveData?.summary || { distance: '0 km', driving: '0 h 00 m', idle: '0 m', alerts: 0 };
+  const summary = liveData?.summary || { distance: '0.00 km', driving: '0 h 00 m', idle: '0 m', alerts: 0 };
   const openAlerts = (liveData?.alerts || []).filter(alert => alert.state === 'Open').length;
   const alertLabel = openAlerts ? `${openAlerts} security item${openAlerts === 1 ? '' : 's'} need${openAlerts === 1 ? 's' : ''} your attention` : 'No active security alerts';
   const deviceCount = (liveData?.deviceLinks || []).length;
@@ -197,7 +197,7 @@ function renderVehicles() { return `${pageHeading(viewMeta.vehicles, '<button cl
 function renderActivity() {
   const events = liveData?.events || [];
   const rows = events.length ? events.map(event => `<tr><td>${event.vehicleId || event.deviceLinkId || 'Mobile device'}</td><td>${event.type || 'Position'}</td><td>${new Date(event.receivedAt || Date.now()).toLocaleString()}</td><td>${event.quality || 'Measured'}</td></tr>`).join('') : '<tr><td colspan="4" class="empty-state">No activity recorded yet.</td></tr>';
-  return `${pageHeading(viewMeta.activity, '<button class="btn" data-action="export">Export view</button>')}<div class="stats-grid">${statCard('Distance travelled', liveData?.summary?.distance || '0 km', `${vehicles.length} vehicle${vehicles.length === 1 ? '' : 's'}`, '⌁')}${statCard('Running time', liveData?.summary?.driving || '0 h 00 m', 'Measured GPS activity', '◷', 'blue')}${statCard('Parking events', String(events.length), 'Recorded events', '⌂', 'orange')}${statCard('Data quality', events.length ? 'Measured' : 'No data', 'Awaiting GPS events', '✓')}</div><div class="panel table-panel"><div class="panel-header"><div><div class="panel-title">Vehicle activity</div><div class="panel-subtitle">Real events from your connected devices.</div></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Device</th><th>Type</th><th>Received</th><th>Quality</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  return `${pageHeading(viewMeta.activity, '<button class="btn" data-action="export">Export view</button>')}<div class="stats-grid">${statCard('Distance travelled', liveData?.summary?.distance || '0.00 km', `${vehicles.length} vehicle${vehicles.length === 1 ? '' : 's'}`, '⌁')}${statCard('Running time', liveData?.summary?.driving || '0 h 00 m', 'Measured GPS activity', '◷', 'blue')}${statCard('Idle time', liveData?.summary?.idle || '0 m', 'Stopped GPS intervals', '◌', 'orange')}${statCard('Active alerts', String(liveData?.summary?.alerts || 0), 'Open security alerts', '!', 'red')}</div><div class="panel table-panel"><div class="panel-header"><div><div class="panel-title">Vehicle activity</div><div class="panel-subtitle">Real events from your connected devices.</div></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Device</th><th>Type</th><th>Received</th><th>Quality</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 function renderSecurity() {
   const alerts = liveData?.alerts || [];
