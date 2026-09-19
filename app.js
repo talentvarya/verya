@@ -17,6 +17,8 @@ let liveData = null;
 let liveMap = null;
 let liveMapViewKey = '';
 const liveMarkers = new Map();
+const liveMarkerAnimations = new Map();
+const liveMarkerStates = new Map();
 let liveTrailLayers = [];
 const pageWrap = document.getElementById('pageWrap');
 const toast = document.getElementById('toast');
@@ -89,17 +91,42 @@ function refreshLiveMap() {
   });
   (liveData?.deviceLinks || []).filter(link => !link.vehicleId && link.lastPosition?.lat && link.lastPosition?.lng).forEach(link => points.push({ id: link.id, name: link.phone || 'Registered phone', lat: link.lastPosition.lat, lng: link.lastPosition.lng, status: link.status || 'Stopped', speed: `${Number(link.speed || 0)} km/h`, icon: '♙' }));
   const pointIds = new Set(points.map(point => point.id));
-  liveMarkers.forEach((marker, id) => { if (!pointIds.has(id)) { liveMap.removeLayer(marker); liveMarkers.delete(id); } });
+  liveMarkers.forEach((marker, id) => { if (!pointIds.has(id)) { liveMap.removeLayer(marker); liveMarkers.delete(id); liveMarkerStates.delete(id); const animation = liveMarkerAnimations.get(id); if (animation) cancelAnimationFrame(animation); liveMarkerAnimations.delete(id); } });
   liveTrailLayers.forEach(layer => liveMap.removeLayer(layer));
   liveTrailLayers = [];
   points.forEach(point => {
     const moving = point.status === 'Moving';
-    const markerIcon = L.divIcon({ className: 'veyra-marker-wrap', html: `<span class="veyra-marker ${moving ? 'moving' : 'stopped'}"><span class="veyra-marker-icon">${point.icon}</span></span>`, iconSize: [46, 46], iconAnchor: [23, 23] });
+    const markerIcon = L.divIcon({ className: 'veyra-marker-wrap', html: `<span class="veyra-marker ${moving ? 'moving' : 'stopped'}"><span class="veyra-marker-icon">${point.icon}</span><span class="veyra-marker-status">${moving ? 'LIVE' : 'STOP'}</span></span>`, iconSize: [52, 52], iconAnchor: [26, 26] });
     const marker = liveMarkers.get(point.id);
-    if (marker) { marker.setLatLng([point.lat, point.lng]); marker.setIcon(markerIcon); marker.setPopupContent(`<strong>${point.name}</strong><br>${point.status} · ${point.speed}`); }
-    else { const created = L.marker([point.lat, point.lng], { icon: markerIcon }).addTo(liveMap); created.bindPopup(`<strong>${point.name}</strong><br>${point.status} · ${point.speed}`); liveMarkers.set(point.id, created); }
-    const trailEvents = (liveData?.events || []).filter(event => (event.deviceLinkId || event.vehicleId) === point.id && event.raw?.lat && event.raw?.lng).slice(0, 20).reverse();
-    if (trailEvents.length > 1) liveTrailLayers.push(L.polyline(trailEvents.map(event => [Number(event.raw.lat), Number(event.raw.lng)]).concat([[point.lat, point.lng]]), { color: moving ? '#13a6a1' : '#4e7bf2', weight: 5, opacity: .72, dashArray: moving ? null : '7 8' }).addTo(liveMap));
+    const nextPosition = [point.lat, point.lng];
+    if (marker) {
+      marker.setIcon(markerIcon);
+      marker.setPopupContent(`<strong>${point.name}</strong><br>${point.status} · ${point.speed}`);
+      const previous = marker.getLatLng();
+      const previousPosition = [Number(previous.lat), Number(previous.lng)];
+      const distance = Math.abs(previousPosition[0] - nextPosition[0]) + Math.abs(previousPosition[1] - nextPosition[1]);
+      const previousAnimation = liveMarkerAnimations.get(point.id);
+      if (previousAnimation) cancelAnimationFrame(previousAnimation);
+      if (distance > 0.0000005) {
+        const startedAt = performance.now();
+        const duration = Math.min(4200, Math.max(900, distance * 130000000));
+        const step = now => {
+          const progress = Math.min(1, (now - startedAt) / duration);
+          const eased = progress < .5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+          marker.setLatLng([previousPosition[0] + (nextPosition[0] - previousPosition[0]) * eased, previousPosition[1] + (nextPosition[1] - previousPosition[1]) * eased]);
+          if (progress < 1) liveMarkerAnimations.set(point.id, requestAnimationFrame(step));
+          else { liveMarkerAnimations.delete(point.id); liveMarkerStates.set(point.id, { lat: point.lat, lng: point.lng }); }
+        };
+        liveMarkerAnimations.set(point.id, requestAnimationFrame(step));
+      } else marker.setLatLng(nextPosition);
+      liveMarkerStates.set(point.id, { lat: point.lat, lng: point.lng });
+    } else { const created = L.marker(nextPosition, { icon: markerIcon }).addTo(liveMap); created.bindPopup(`<strong>${point.name}</strong><br>${point.status} · ${point.speed}`); liveMarkers.set(point.id, created); liveMarkerStates.set(point.id, { lat: point.lat, lng: point.lng }); }
+    const trailEvents = (liveData?.events || []).filter(event => (event.deviceLinkId || event.vehicleId) === point.id && event.raw?.lat && event.raw?.lng).slice(0, 24).reverse();
+    const trailPoints = trailEvents.map(event => [Number(event.raw.lat), Number(event.raw.lng)]);
+    if (trailPoints.length > 1) {
+      liveTrailLayers.push(L.polyline(trailPoints, { color: '#ffffff', weight: 9, opacity: .58, lineCap: 'round', lineJoin: 'round' }).addTo(liveMap));
+      liveTrailLayers.push(L.polyline(trailPoints, { color: moving ? '#0b9c91' : '#5278e8', weight: 4, opacity: .9, lineCap: 'round', lineJoin: 'round', dashArray: moving ? null : '7 8' }).addTo(liveMap));
+    }
   });
   const count = document.getElementById('mapDeviceCount'); if (count) count.textContent = `${points.length} live device${points.length === 1 ? '' : 's'}`;
   const sync = document.getElementById('mapSync'); if (sync) sync.textContent = points.length ? `Updated ${new Date().toLocaleTimeString()}` : 'Waiting for GPS data';
@@ -146,7 +173,7 @@ function renderDevicePanel() {
 
 function renderView(view = state.view) {
   state.view = view;
-  if (liveMap) { liveMap.remove(); liveMap = null; liveMapViewKey = ''; liveMarkers.clear(); liveTrailLayers = []; }
+  if (liveMap) { liveMap.remove(); liveMap = null; liveMapViewKey = ''; liveMarkers.clear(); liveMarkerStates.clear(); liveMarkerAnimations.forEach(animation => cancelAnimationFrame(animation)); liveMarkerAnimations.clear(); liveTrailLayers = []; }
   const meta = viewMeta[view];
   document.getElementById('breadcrumbCurrent').textContent = meta.title.replace('Good morning, Arjun', 'Overview');
   document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
