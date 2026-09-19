@@ -7,7 +7,7 @@ const { spawn } = require('child_process');
 const port = 4174;
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'veyra-test-'));
 const dataFile = path.join(tempDir, 'store.json');
-const server = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT: String(port), DATA_FILE: dataFile, VEYRA_DISABLE_SUPABASE: '1', SUPABASE_URL: '', SUPABASE_SECRET_KEY: '', SUPABASE_SERVICE_ROLE_KEY: '', SUPABASE_PUBLISHABLE_KEY: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT: String(port), DATA_FILE: dataFile, VEYRA_DISABLE_SUPABASE: '1', VEYRA_OTP_MODE: 'demo', SUPABASE_URL: '', SUPABASE_SECRET_KEY: '', SUPABASE_SERVICE_ROLE_KEY: '', SUPABASE_PUBLISHABLE_KEY: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
 
 async function request(route, options = {}) {
   const response = await fetch(`http://127.0.0.1:${port}${route}`, options);

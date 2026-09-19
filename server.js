@@ -23,6 +23,12 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || '';
 const SUPABASE_ENABLED = process.env.VEYRA_DISABLE_SUPABASE !== '1' && Boolean(SUPABASE_URL && SUPABASE_KEY);
+const OTP_MODE = String(process.env.VEYRA_OTP_MODE || 'auto').toLowerCase();
+const SMSLOCAL_API_KEY = process.env.SMSLOCAL_API_KEY || '';
+const SMSLOCAL_SENDER_ID = process.env.SMSLOCAL_SENDER_ID || '';
+const SMSLOCAL_DLT_TEMPLATE_ID = process.env.SMSLOCAL_DLT_TEMPLATE_ID || '';
+const SMSLOCAL_API_URL = process.env.SMSLOCAL_API_URL || 'https://app.smslocal.in/api/smsapi';
+const SMSLOCAL_ENABLED = Boolean(SMSLOCAL_API_KEY && SMSLOCAL_SENDER_ID && SMSLOCAL_DLT_TEMPLATE_ID);
 const pendingPhoneOtps = new Map();
 const requestWindows = new Map();
 
@@ -72,6 +78,15 @@ async function supabaseAuthRequest(pathname, payload) {
   const response = await fetch(`${SUPABASE_URL}/auth/v1/${pathname}`, { method: 'POST', headers: { apikey: SUPABASE_PUBLISHABLE_KEY, 'User-Agent': 'veyra-server/1.0', 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   const text = await response.text(); let result = {}; try { result = text ? JSON.parse(text) : {}; } catch { result = { error: text }; }
   if (!response.ok) throw new Error(result.msg || result.error_description || result.error || `Supabase Auth request failed (${response.status})`);
+  return result;
+}
+function createOtpCode() { return String(Math.floor(100000 + Math.random() * 900000)); }
+async function sendSmsLocalOtp(phone, code) {
+  if (!SMSLOCAL_ENABLED) throw new Error('SMSLocal testing is not configured. Add API key, sender ID, and DLT template ID.');
+  const params = new URLSearchParams({ key: SMSLOCAL_API_KEY, route: '2', sender: SMSLOCAL_SENDER_ID, number: phone.replace(/^\+/, ''), sms: `Your Veyra verification code is ${code}. It expires in 5 minutes.`, templateid: SMSLOCAL_DLT_TEMPLATE_ID });
+  const response = await fetch(`${SMSLOCAL_API_URL}?${params.toString()}`, { headers: { Accept: 'text/plain, application/json', 'User-Agent': 'veyra-server/1.0' } });
+  const result = (await response.text()).trim();
+  if (!response.ok || !result || /^(10[1-9]|11[0-6])$/.test(result)) throw new Error(`SMSLocal rejected the OTP request (${result || response.status}).`);
   return result;
 }
 function normalizePhone(value) { const phone = String(value || '').replace(/[\s()-]/g, ''); return /^\+[1-9]\d{7,14}$/.test(phone) ? phone : null; }
@@ -128,10 +143,17 @@ async function handler(req, res) {
       if (!allowRequest(`otp:${req.socket.remoteAddress || 'unknown'}`, 20, 60_000)) return send(res, 429, { error: 'Too many OTP requests. Try again in a minute.' });
       const input = await body(req); const phone = normalizePhone(input.phone); if (!phone) return send(res, 400, { error: 'Use international format, for example +919876543210.' });
       const vehicleId = input.vehicleId; let mode = 'demo'; let demoCode;
-      if (SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY) {
+      if ((OTP_MODE === 'smslocal' || (OTP_MODE === 'auto' && SMSLOCAL_ENABLED)) && SMSLOCAL_ENABLED) {
+        demoCode = createOtpCode();
+        try { await sendSmsLocalOtp(phone, demoCode); mode = 'smslocal'; }
+        catch (error) { if (OTP_MODE === 'smslocal') return send(res, 502, { error: error.message }); console.warn(`SMSLocal unavailable; using fallback OTP mode: ${error.message}`); }
+      } else if (OTP_MODE === 'smslocal') {
+        return send(res, 503, { error: 'SMSLocal testing is not configured. Add API key, sender ID, and DLT template ID.' });
+      }
+      if (mode === 'demo' && OTP_MODE !== 'smslocal' && SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY) {
         try { await supabaseAuthRequest('otp', { phone }); mode = 'supabase'; }
-        catch (error) { console.warn(`Supabase SMS unavailable; using local demo OTP: ${error.message}`); mode = 'demo'; demoCode = String(Math.floor(100000 + Math.random() * 900000)); }
-      } else { demoCode = String(Math.floor(100000 + Math.random() * 900000)); }
+        catch (error) { console.warn(`Supabase SMS unavailable; using local demo OTP: ${error.message}`); mode = 'demo'; demoCode = createOtpCode(); }
+      } else if (mode === 'demo') { demoCode = createOtpCode(); }
       pendingPhoneOtps.set(phone, { code: demoCode, vehicleId, expiresAt: Date.now() + 5 * 60 * 1000, mode });
       return send(res, 200, { ok: true, mode, phone: maskPhone(phone), ...(demoCode ? { demoCode } : {}) });
     }

@@ -15,4 +15,11 @@ services:
         sync: false
       - key: SUPABASE_PUBLISHABLE_KEY
         sync: false
-
+      - key: VEYRA_OTP_MODE
+        value: auto
+      - key: SMSLOCAL_API_KEY
+        sync: false
+      - key: SMSLOCAL_SENDER_ID
+        sync: false
+      - key: SMSLOCAL_DLT_TEMPLATE_ID
+        sync: false

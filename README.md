@@ -52,6 +52,6 @@ Run the API test suite with `npm test`. A minimal Docker image is included in `D
 
 ## Render deployment
 
-`render.yaml` is included for a single Node web service. Push this folder to a GitHub, GitLab, or Bitbucket repository, create a Render Blueprint from that repository, and fill `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and `SUPABASE_PUBLISHABLE_KEY` as secret environment variables. Render will provide an HTTPS URL for both `/` and `/device.html`; phones can use mobile data or any Wi-Fi without sharing the laptop's network.
+`render.yaml` is included for a single Node web service. Push this folder to a GitHub, GitLab, or Bitbucket repository, create a Render Blueprint from that repository, and fill `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and `SUPABASE_PUBLISHABLE_KEY` as secret environment variables. For real India SMS testing, also fill `SMSLOCAL_API_KEY`, `SMSLOCAL_SENDER_ID`, and `SMSLOCAL_DLT_TEMPLATE_ID`; set `VEYRA_OTP_MODE=smslocal` to require SMSLocal or leave it as `auto` to fall back to Supabase/demo OTP. Render will provide an HTTPS URL for both `/` and `/device.html`; phones can use mobile data or any Wi-Fi without sharing the laptop's network.
 
 The device page is also installable as a PWA on HTTPS browsers. The PWA shell improves access from the phone home screen, but reliable screen-off/background location still requires a native Android implementation and explicit background-location permission.
