@@ -24,6 +24,7 @@ const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SER
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || '';
 const SUPABASE_ENABLED = process.env.VEYRA_DISABLE_SUPABASE !== '1' && Boolean(SUPABASE_URL && SUPABASE_KEY);
 const pendingPhoneOtps = new Map();
+const requestWindows = new Map();
 
 const initialData = {
   summary: { distance: '267.4 km', driving: '8 h 12 m', idle: '42 m', alerts: 2 },
@@ -77,6 +78,12 @@ function normalizePhone(value) { const phone = String(value || '').replace(/[\s(
 function maskPhone(phone) { return `${phone.slice(0, 3)}••••${phone.slice(-4)}`; }
 function createDeviceToken() { return crypto.randomBytes(32).toString('base64url'); }
 function hashDeviceToken(token) { return crypto.createHash('sha256').update(String(token || '')).digest('hex'); }
+function allowRequest(key, limit, windowMs) {
+  const now = Date.now(); const current = requestWindows.get(key) || { count: 0, startedAt: now };
+  if (now - current.startedAt >= windowMs) { current.count = 0; current.startedAt = now; }
+  current.count += 1; requestWindows.set(key, current);
+  return current.count <= limit;
+}
 function deviceTokenMatches(req, input, link) {
   if (!link?.deviceTokenHash) return true;
   const token = req.headers['x-device-token'] || input.deviceToken;
@@ -98,7 +105,7 @@ async function writeData(data) {
 function send(res, status, payload, type = 'application/json; charset=utf-8') { res.writeHead(status, { 'Content-Type': type, 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' }); res.end(type.startsWith('application/json') ? JSON.stringify(payload) : payload); }
 function body(req) { return new Promise((resolve, reject) => { let raw = ''; req.on('data', chunk => raw += chunk); req.on('end', () => { try { resolve(raw ? JSON.parse(raw) : {}); } catch { reject(new Error('Invalid JSON')); } }); req.on('error', reject); }); }
 function audit(data, action) { data.audit.unshift({ time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }), actor: 'Arjun Rao', action }); data.audit = data.audit.slice(0, 20); }
-function safeFile(urlPath) { const requested = urlPath === '/' ? '/index.html' : urlPath; const file = path.normalize(path.join(ROOT, requested)); return file.startsWith(ROOT) ? file : null; }
+function safeFile(urlPath) { const requested = urlPath === '/' ? '/index.html' : urlPath; const file = path.normalize(path.join(ROOT, requested)); return file === ROOT || file.startsWith(`${ROOT}${path.sep}`) ? file : null; }
 function permissions(role) { return { view: true, export: role !== 'driver', acknowledge: ['owner', 'responder'].includes(role), manageVehicles: role === 'owner', manageGroup: role === 'owner', managePolicies: role === 'owner', ingest: ['owner', 'driver'].includes(role) }; }
 function can(data, action) { return Boolean(permissions(data.session?.role || 'owner')[action]); }
 function deny(res, action) { return send(res, 403, { error: `Current role cannot ${action}. Switch to an authorized role first.` }); }
@@ -118,6 +125,7 @@ async function handler(req, res) {
       const data = await readData(); data.session.role = role; audit(data, `Switched demo session role to ${role}.`); await writeData(data); return send(res, 200, { ...data.session, permissions: permissions(role) });
     }
     if (pathname === '/api/phone/request' && req.method === 'POST') {
+      if (!allowRequest(`otp:${req.socket.remoteAddress || 'unknown'}`, 20, 60_000)) return send(res, 429, { error: 'Too many OTP requests. Try again in a minute.' });
       const input = await body(req); const phone = normalizePhone(input.phone); if (!phone) return send(res, 400, { error: 'Use international format, for example +919876543210.' });
       const vehicleId = input.vehicleId; let mode = 'demo'; let demoCode;
       if (SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY) {
@@ -128,6 +136,7 @@ async function handler(req, res) {
       return send(res, 200, { ok: true, mode, phone: maskPhone(phone), ...(demoCode ? { demoCode } : {}) });
     }
     if (pathname === '/api/phone/verify' && req.method === 'POST') {
+      if (!allowRequest(`verify:${req.socket.remoteAddress || 'unknown'}`, 30, 60_000)) return send(res, 429, { error: 'Too many verification attempts. Try again in a minute.' });
       const input = await body(req); const phone = normalizePhone(input.phone); const pending = phone && pendingPhoneOtps.get(phone); if (!phone || !pending || pending.expiresAt < Date.now()) return send(res, 400, { error: 'OTP request expired. Request a new code.' });
       let userId = `demo-${Buffer.from(phone).toString('base64url').slice(-10)}`;
       if (pending.mode === 'supabase') { try { const auth = await supabaseAuthRequest('verify', { phone, token: String(input.code || ''), type: 'sms' }); userId = auth.user?.id || userId; } catch (error) { return send(res, 401, { error: error.message }); } }
@@ -175,7 +184,7 @@ async function handler(req, res) {
     }
     if (pathname === '/api/ingest/position' && req.method === 'POST') {
       const data = await readData(); if (!can(data, 'ingest')) return deny(res, 'ingest position events'); const input = await body(req); const link = input.deviceLinkId ? data.deviceLinks.find(item => item.id === input.deviceLinkId) : null; if (link && !deviceTokenMatches(req, input, link)) return send(res, 401, { error: 'This device is not authorized. Pair it again.' }); const vehicle = data.vehicles.find(item => item.id === input.vehicleId) || (link?.vehicleId ? data.vehicles.find(item => item.id === link.vehicleId) : null); if (!vehicle && !link) return send(res, 404, { error: 'Vehicle or paired device not found.' });
-      const speed = Math.max(0, Number(input.speed || 0)); const position = { lat: Number(input.lat), lng: Number(input.lng), accuracy: Number(input.accuracy || 20), source: input.source || 'Webhook' }; if (vehicle) { vehicle.position = position; vehicle.speed = `${speed} km/h`; vehicle.status = speed > 3 ? 'Moving' : 'Parked'; vehicle.statusClass = vehicle.status === 'Moving' ? 'status-live' : 'status-parked'; vehicle.last = 'Just now'; vehicle.location = input.location || 'Normalized webhook position · just now'; } if (link) { link.lastPosition = position; link.speed = speed; link.status = speed > 3 ? 'Moving' : 'Stopped'; link.lastSeen = new Date().toISOString(); } data.events.unshift({ eventId: input.eventId || `EV-${Date.now()}`, vehicleId: vehicle?.id || null, deviceLinkId: link?.id || input.deviceLinkId || null, type: 'position', receivedAt: new Date().toISOString(), quality: 'Measured', raw: input }); data.events = data.events.slice(0, 50); audit(data, `Ingested a normalized position event for ${vehicle?.name || link?.phone || 'mobile device'}.`); await writeData(data); return send(res, 200, vehicle || { id: link.id, name: link.phone, status: link.status, speed: `${speed} km/h`, position });
+      const lat = Number(input.lat); const lng = Number(input.lng); const speed = Math.max(0, Number(input.speed || 0)); const accuracy = Math.max(0, Number(input.accuracy || 20)); if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) return send(res, 400, { error: 'A valid latitude and longitude are required.' }); if (!Number.isFinite(speed) || !Number.isFinite(accuracy)) return send(res, 400, { error: 'Speed and accuracy must be valid numbers.' }); const position = { lat, lng, accuracy, source: input.source || 'Webhook' }; if (vehicle) { vehicle.position = position; vehicle.speed = `${speed} km/h`; vehicle.status = speed > 3 ? 'Moving' : 'Parked'; vehicle.statusClass = vehicle.status === 'Moving' ? 'status-live' : 'status-parked'; vehicle.last = 'Just now'; vehicle.location = input.location || 'Normalized webhook position · just now'; } if (link) { link.lastPosition = position; link.speed = speed; link.status = speed > 3 ? 'Moving' : 'Stopped'; link.lastSeen = new Date().toISOString(); } data.events.unshift({ eventId: input.eventId || `EV-${Date.now()}`, vehicleId: vehicle?.id || null, deviceLinkId: link?.id || input.deviceLinkId || null, type: 'position', receivedAt: new Date().toISOString(), quality: 'Measured', raw: input }); data.events = data.events.slice(0, 50); audit(data, `Ingested a normalized position event for ${vehicle?.name || link?.phone || 'mobile device'}.`); await writeData(data); return send(res, 200, vehicle || { id: link.id, name: link.phone, status: link.status, speed: `${speed} km/h`, position });
     }
 
     if (req.method === 'GET') {
