@@ -23,14 +23,13 @@
         <span class="workspace-copy"><small>Workspace</small><strong id="workspaceName">Home garage</strong></span>
         <span class="chevron">⌄</span>
       </button>
-      <button class="workspace-role" id="roleButton" aria-label="Change demo role">Demo role: owner</button>
 
       <div class="side-label">Workspace</div>
       <nav class="primary-nav" id="primaryNav" aria-label="Primary navigation">
         <button class="nav-item active" data-view="home"><span class="nav-icon">⌂</span><span>Overview</span></button>
-        <button class="nav-item" data-view="vehicles"><span class="nav-icon">▣</span><span>Vehicles</span><span class="nav-count">3</span></button>
+        <button class="nav-item" data-view="vehicles"><span class="nav-icon">▣</span><span>Vehicles</span><span class="nav-count">0</span></button>
         <button class="nav-item" data-view="activity"><span class="nav-icon">⌁</span><span>Activity</span></button>
-        <button class="nav-item" data-view="security"><span class="nav-icon">◈</span><span>Security</span><span class="nav-count alert-count">2</span></button>
+        <button class="nav-item" data-view="security"><span class="nav-icon">◈</span><span>Security</span><span class="nav-count alert-count">0</span></button>
         <button class="nav-item" data-view="trips"><span class="nav-icon">↗</span><span>Trips</span></button>
         <button class="nav-item" data-view="maintenance"><span class="nav-icon">⌕</span><span>Maintenance</span><span class="nav-count soft-count">1</span></button>
       </nav>
@@ -45,10 +44,10 @@
       <div class="sidebar-footer">
         <div class="upgrade-card">
           <span class="upgrade-dot"></span>
-          <div><strong>Connected plan</strong><small>3 of 5 vehicles active</small></div>
+          <div><strong>Fleet workspace</strong><small id="planSummary">0 vehicles connected</small></div>
           <button aria-label="View plan">→</button>
         </div>
-        <div class="user-row"><div class="user-avatar">AR</div><div><strong>Arjun Rao</strong><small>Private owner</small></div><button class="more-button" aria-label="More options">•••</button></div>
+        <div class="user-row"><div class="user-avatar" id="userInitials">AD</div><div><strong id="userName">Admin</strong><small id="userSubtitle">Signed in</small></div><button class="more-button" id="logoutButton" aria-label="Log out">↪</button></div>
       </div>
     </aside>
 
@@ -60,8 +59,7 @@
           <div class="live-pill"><span class="pulse"></span>All systems operational</div>
           <button class="icon-button" id="helpButton" aria-label="Help">?</button>
           <button class="icon-button notification-button" id="notificationButton" aria-label="Notifications"><span>♢</span><i></i></button>
-          <button class="icon-button" id="simulateButton" aria-label="Simulate GPS ping">↻</button>
-          <div class="top-avatar">AR</div>
+          <div class="top-avatar" id="topInitials">AD</div>
         </div>
       </header>
 

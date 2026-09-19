@@ -9,7 +9,7 @@ function loadDotEnv() {
   if (!fs.existsSync(envPath)) return;
   for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
     const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
-    if (match && !process.env[match[1]]) process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, '');
+    if (match && !(match[1] in process.env)) process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, '');
   }
 }
 loadDotEnv();
@@ -23,6 +23,8 @@ const SUPABASE_URL = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || '';
 const SUPABASE_ENABLED = process.env.VEYRA_DISABLE_SUPABASE !== '1' && Boolean(SUPABASE_URL && SUPABASE_KEY);
+const SUPABASE_AUTH_ENABLED = Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY);
+const STATE_ID = 'fleet:primary';
 const OTP_MODE = String(process.env.VEYRA_OTP_MODE || 'auto').toLowerCase();
 const SMSLOCAL_API_KEY = process.env.SMSLOCAL_API_KEY || '';
 const SMSLOCAL_SENDER_ID = process.env.SMSLOCAL_SENDER_ID || '';
@@ -33,25 +35,14 @@ const pendingPhoneOtps = new Map();
 const requestWindows = new Map();
 
 const initialData = {
-  summary: { distance: '267.4 km', driving: '8 h 12 m', idle: '42 m', alerts: 2 },
-  vehicles: [
-    { id: 'DL01AB1234', name: 'Toyota Innova', icon: '🚙', status: 'Moving', statusClass: 'status-live', location: 'Outer Ring Road · 2 min ago', speed: '48 km/h', km: '186.4 km', last: 'Live now', source: 'GPS tracker', capabilities: ['GPS', 'Ignition', 'Accelerometer'] },
-    { id: 'DL02CD7788', name: 'Hyundai Creta', icon: '🚗', status: 'Parked', statusClass: 'status-parked', location: 'Home garage · 14 min ago', speed: '—', km: '42.8 km', last: '14 min ago', source: 'GPS tracker', capabilities: ['GPS', 'Ignition'] },
-    { id: 'DL03EF9012', name: 'Tata Nexon EV', icon: '⚡', status: 'Charging', statusClass: 'status-live', location: 'Office parking · 31 min ago', speed: '—', km: '38.2 km', last: '31 min ago', source: 'EV connector', capabilities: ['GPS', 'EV telemetry'] }
-  ],
-  alerts: [
-    { id: 'A-101', family: 'Connectivity', title: 'Device offline · Hyundai Creta', detail: 'Last known location: Home garage · 14 min ago', severity: 'Medium', state: 'Open' },
-    { id: 'A-102', family: 'Safety', title: 'Sustained overspeed · Toyota Innova', detail: '92 km/h for 48 sec · Outer Ring Road · 10:31 AM', severity: 'Low', state: 'Acknowledged' }
-  ],
-  members: [
-    { name: 'Arjun Rao', role: 'Owner', scope: 'All vehicles', state: 'Active' },
-    { name: 'Meera Rao', role: 'Household member', scope: '2 vehicles', state: 'Active' },
-    { name: 'Rohan Mehta', role: 'Viewer', scope: 'Pending invite', state: 'Pending' }
-  ],
-  audit: [{ time: '10:42 AM', actor: 'System', action: 'Connected 3 devices and refreshed activity metrics.' }],
+  summary: { distance: '0 km', driving: '0 h 00 m', idle: '0 m', alerts: 0 },
+  vehicles: [],
+  alerts: [],
+  members: [],
+  audit: [],
   settings: { waitingGraceMinutes: 5, parkingThresholdMinutes: 10, timezone: 'Asia/Calcutta' },
-  session: { user: 'Arjun Rao', role: 'owner', workspace: 'Home garage' },
-  geofences: [{ id: 'G-001', name: 'Home garage', type: 'Home', status: 'Active' }],
+  session: { user: '', role: 'owner', workspace: 'Fleet workspace' },
+  geofences: [],
   events: []
 };
 
@@ -74,11 +65,25 @@ async function supabaseRequest(pathname, options = {}) {
   if (!response.ok) throw new Error(`Supabase request failed (${response.status})`);
   const text = await response.text(); return text ? JSON.parse(text) : null;
 }
-async function supabaseAuthRequest(pathname, payload) {
-  const response = await fetch(`${SUPABASE_URL}/auth/v1/${pathname}`, { method: 'POST', headers: { apikey: SUPABASE_PUBLISHABLE_KEY, 'User-Agent': 'veyra-server/1.0', 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+async function supabaseAuthRequest(pathname, payload, options = {}) {
+  const response = await fetch(`${SUPABASE_URL}/auth/v1/${pathname}`, { method: options.method || 'POST', headers: { apikey: SUPABASE_PUBLISHABLE_KEY, 'User-Agent': 'veyra-server/1.0', 'Content-Type': 'application/json', ...(options.headers || {}) }, body: options.method === 'GET' ? undefined : JSON.stringify(payload || {}) });
   const text = await response.text(); let result = {}; try { result = text ? JSON.parse(text) : {}; } catch { result = { error: text }; }
   if (!response.ok) throw new Error(result.msg || result.error_description || result.error || `Supabase Auth request failed (${response.status})`);
   return result;
+}
+function parseCookies(req) { return Object.fromEntries(String(req.headers.cookie || '').split(';').map(item => item.trim()).filter(Boolean).map(item => { const index = item.indexOf('='); return [index === -1 ? item : item.slice(0, index), index === -1 ? '' : decodeURIComponent(item.slice(index + 1))]; })); }
+function cookieOptions(maxAge) { return `Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`; }
+function authCookies(session) { return [`veyra_access_token=${encodeURIComponent(session.access_token)}; ${cookieOptions(Number(session.expires_in || 3600))}`, `veyra_refresh_token=${encodeURIComponent(session.refresh_token)}; ${cookieOptions(60 * 60 * 24 * 30)}`]; }
+async function authUser(req) {
+  if (!SUPABASE_AUTH_ENABLED) return { id: 'local-dev', email: 'local@dev', role: 'owner' };
+  const cookies = parseCookies(req); const token = cookies.veyra_access_token || String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!token) return null;
+  try { return await supabaseAuthRequest('user', null, { method: 'GET', headers: { Authorization: `Bearer ${token}` } }); } catch { return null; }
+}
+async function requireAuth(req, res) {
+  const user = await authUser(req);
+  if (!user) { send(res, 401, { error: 'Login required.' }); return null; }
+  req.authUser = user; return user;
 }
 function createOtpCode() { return String(Math.floor(100000 + Math.random() * 900000)); }
 async function sendSmsLocalOtp(phone, code) {
@@ -109,15 +114,15 @@ function deviceTokenMatches(req, input, link) {
 }
 async function readData() {
   if (!SUPABASE_ENABLED) return readStore();
-  const rows = await supabaseRequest('app_state?id=eq.default&select=payload');
+  const rows = await supabaseRequest(`app_state?id=eq.${encodeURIComponent(STATE_ID)}&select=payload`);
   if (rows?.[0]?.payload) return normalizeData(rows[0].payload);
-  const seed = readStore(); await writeData(seed); return seed;
+  const seed = normalizeData(JSON.parse(JSON.stringify(initialData))); await writeData(seed); return seed;
 }
 async function writeData(data) {
   if (!SUPABASE_ENABLED) return writeStore(data);
-  await supabaseRequest('app_state', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify([{ id: 'default', payload: data }]) });
+  await supabaseRequest('app_state', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify([{ id: STATE_ID, payload: data }]) });
 }
-function send(res, status, payload, type = 'application/json; charset=utf-8') { res.writeHead(status, { 'Content-Type': type, 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' }); res.end(type.startsWith('application/json') ? JSON.stringify(payload) : payload); }
+function send(res, status, payload, type = 'application/json; charset=utf-8', headers = {}) { res.writeHead(status, { 'Content-Type': type, 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store', ...headers }); res.end(type.startsWith('application/json') ? JSON.stringify(payload) : payload); }
 function body(req) { return new Promise((resolve, reject) => { let raw = ''; req.on('data', chunk => raw += chunk); req.on('end', () => { try { resolve(raw ? JSON.parse(raw) : {}); } catch { reject(new Error('Invalid JSON')); } }); req.on('error', reject); }); }
 function audit(data, action) { data.audit.unshift({ time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }), actor: 'Arjun Rao', action }); data.audit = data.audit.slice(0, 20); }
 function safeFile(urlPath) { const requested = urlPath === '/' ? '/index.html' : urlPath; const file = path.normalize(path.join(ROOT, requested)); return file === ROOT || file.startsWith(`${ROOT}${path.sep}`) ? file : null; }
@@ -131,9 +136,39 @@ async function handler(req, res) {
   if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, X-Device-Token', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS' }); return res.end(); }
 
   try {
+    if (pathname === '/api/auth/signup' && req.method === 'POST') {
+      if (!SUPABASE_AUTH_ENABLED) return send(res, 503, { error: 'Supabase Auth is not configured.' });
+      const input = await body(req); const email = String(input.email || '').trim().toLowerCase(); const password = String(input.password || '');
+      if (!/^\S+@\S+\.\S+$/.test(email) || password.length < 8) return send(res, 400, { error: 'Enter a valid email and a password of at least 8 characters.' });
+      try {
+        const result = await supabaseAuthRequest('signup', { email, password });
+        const headers = result.access_token ? { 'Set-Cookie': authCookies(result) } : {};
+        return send(res, 201, { ok: true, requiresEmailConfirmation: !result.access_token, user: result.user ? { id: result.user.id, email: result.user.email } : null }, 'application/json; charset=utf-8', headers);
+      } catch (error) { return send(res, 400, { error: error.message }); }
+    }
+    if (pathname === '/api/auth/login' && req.method === 'POST') {
+      if (!SUPABASE_AUTH_ENABLED) return send(res, 503, { error: 'Supabase Auth is not configured.' });
+      const input = await body(req); const email = String(input.email || '').trim().toLowerCase(); const password = String(input.password || '');
+      if (!email || !password) return send(res, 400, { error: 'Email and password are required.' });
+      try { const result = await supabaseAuthRequest('token?grant_type=password', { email, password }); return send(res, 200, { ok: true, user: { id: result.user?.id, email: result.user?.email } }, 'application/json; charset=utf-8', { 'Set-Cookie': authCookies(result) }); }
+      catch (error) { return send(res, 401, { error: 'Email or password is incorrect.' }); }
+    }
+    if (pathname === '/api/auth/refresh' && req.method === 'POST') {
+      if (!SUPABASE_AUTH_ENABLED) return send(res, 503, { error: 'Supabase Auth is not configured.' });
+      const refreshToken = parseCookies(req).veyra_refresh_token;
+      if (!refreshToken) return send(res, 401, { error: 'Login session expired.' });
+      try { const result = await supabaseAuthRequest('token?grant_type=refresh_token', { refresh_token: refreshToken }); return send(res, 200, { ok: true }, 'application/json; charset=utf-8', { 'Set-Cookie': authCookies(result) }); }
+      catch { return send(res, 401, { error: 'Login session expired.' }); }
+    }
+    if (pathname === '/api/auth/logout' && req.method === 'POST') return send(res, 200, { ok: true }, 'application/json; charset=utf-8', { 'Set-Cookie': [`veyra_access_token=; ${cookieOptions(0)}`, `veyra_refresh_token=; ${cookieOptions(0)}`] });
+    if (pathname === '/api/auth/me' && req.method === 'GET') { const user = await requireAuth(req, res); if (!user) return; return send(res, 200, { id: user.id, email: user.email }); }
+
+    const publicApi = pathname === '/api/health' || pathname === '/api/phone/request' || pathname === '/api/phone/verify' || pathname === '/api/ingest/position';
+    if (pathname.startsWith('/api/') && !publicApi) { const user = await requireAuth(req, res); if (!user) return; }
+
     if (pathname === '/api/health' && req.method === 'GET') return send(res, 200, { ok: true, service: 'veyra-local-mvp', persistence: SUPABASE_ENABLED ? 'supabase' : 'local-json', time: new Date().toISOString() });
-    if (pathname === '/api/bootstrap' && req.method === 'GET') { const data = await readData(); return send(res, 200, { ...data, permissions: permissions(data.session.role) }); }
-    if (pathname === '/api/session' && req.method === 'GET') { const data = await readData(); return send(res, 200, { ...data.session, permissions: permissions(data.session.role) }); }
+    if (pathname === '/api/bootstrap' && req.method === 'GET') { const data = await readData(); data.session.user = req.authUser.email; data.session.email = req.authUser.email; return send(res, 200, { ...data, permissions: permissions(data.session.role) }); }
+    if (pathname === '/api/session' && req.method === 'GET') { const data = await readData(); data.session.user = req.authUser.email; data.session.email = req.authUser.email; return send(res, 200, { ...data.session, permissions: permissions(data.session.role) }); }
     if (pathname === '/api/session' && req.method === 'PATCH') {
       const input = await body(req); const role = String(input.role || '').toLowerCase();
       if (!['owner', 'viewer', 'driver', 'responder'].includes(role)) return send(res, 400, { error: 'Unsupported role.' });

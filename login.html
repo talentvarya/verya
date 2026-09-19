@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b1324" />
+  <title>Sign in · Veyra</title>
+  <link rel="stylesheet" href="login.css" />
+</head>
+<body>
+  <main class="auth-shell">
+    <section class="auth-card">
+      <div class="brand-mark"><span></span><span></span><span></span></div>
+      <p class="eyebrow">VEYRA · VEHICLE INTELLIGENCE</p>
+      <h1 id="formTitle">Sign in to your fleet</h1>
+      <p class="intro">Use your admin account to view vehicles, devices and live locations.</p>
+      <div class="auth-tabs" role="tablist">
+        <button class="tab active" id="loginTab" type="button">Sign in</button>
+        <button class="tab" id="signupTab" type="button">Create account</button>
+      </div>
+      <form id="authForm">
+        <label>Email<input id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
+        <label>Password<input id="password" name="password" type="password" autocomplete="current-password" minlength="8" required placeholder="At least 8 characters" /></label>
+        <button class="primary" id="submitButton" type="submit">Sign in</button>
+      </form>
+      <p class="message" id="message" role="status"></p>
+      <p class="privacy">Authentication is handled by Supabase. Your password is never stored by Veyra.</p>
+    </section>
+  </main>
+  <script src="auth.js"></script>
+</body>
+</html>
