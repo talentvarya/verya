@@ -16,6 +16,8 @@ let state = { view: 'home', workspace: 'home', selectedVehicle: 0 };
 let liveData = null;
 let liveMap = null;
 let liveMapViewKey = '';
+const liveMarkers = new Map();
+let liveTrailLayers = [];
 const pageWrap = document.getElementById('pageWrap');
 const toast = document.getElementById('toast');
 let toastTimer;
@@ -86,11 +88,18 @@ function refreshLiveMap() {
     if (vehicle.position?.lat && vehicle.position?.lng) points.push({ id: vehicle.id, name: vehicle.name, lat: vehicle.position.lat, lng: vehicle.position.lng, status: vehicle.status || 'Stopped', speed: vehicle.speed || '0 km/h', icon: vehicle.icon });
   });
   (liveData?.deviceLinks || []).filter(link => !link.vehicleId && link.lastPosition?.lat && link.lastPosition?.lng).forEach(link => points.push({ id: link.id, name: link.phone || 'Registered phone', lat: link.lastPosition.lat, lng: link.lastPosition.lng, status: link.status || 'Stopped', speed: `${Number(link.speed || 0)} km/h`, icon: '♙' }));
-  liveMap.eachLayer(layer => { if (layer instanceof L.Marker) liveMap.removeLayer(layer); });
+  const pointIds = new Set(points.map(point => point.id));
+  liveMarkers.forEach((marker, id) => { if (!pointIds.has(id)) { liveMap.removeLayer(marker); liveMarkers.delete(id); } });
+  liveTrailLayers.forEach(layer => liveMap.removeLayer(layer));
+  liveTrailLayers = [];
   points.forEach(point => {
     const moving = point.status === 'Moving';
-    const marker = L.marker([point.lat, point.lng], { icon: L.divIcon({ className: 'veyra-marker-wrap', html: `<span class="veyra-marker ${moving ? 'moving' : 'stopped'}"><span class="veyra-marker-icon">${point.icon}</span></span>`, iconSize: [46, 46], iconAnchor: [23, 23] }) }).addTo(liveMap);
-    marker.bindPopup(`<strong>${point.name}</strong><br>${point.status} · ${point.speed}`);
+    const markerIcon = L.divIcon({ className: 'veyra-marker-wrap', html: `<span class="veyra-marker ${moving ? 'moving' : 'stopped'}"><span class="veyra-marker-icon">${point.icon}</span></span>`, iconSize: [46, 46], iconAnchor: [23, 23] });
+    const marker = liveMarkers.get(point.id);
+    if (marker) { marker.setLatLng([point.lat, point.lng]); marker.setIcon(markerIcon); marker.setPopupContent(`<strong>${point.name}</strong><br>${point.status} · ${point.speed}`); }
+    else { const created = L.marker([point.lat, point.lng], { icon: markerIcon }).addTo(liveMap); created.bindPopup(`<strong>${point.name}</strong><br>${point.status} · ${point.speed}`); liveMarkers.set(point.id, created); }
+    const trailEvents = (liveData?.events || []).filter(event => (event.deviceLinkId || event.vehicleId) === point.id && event.raw?.lat && event.raw?.lng).slice(0, 20).reverse();
+    if (trailEvents.length > 1) liveTrailLayers.push(L.polyline(trailEvents.map(event => [Number(event.raw.lat), Number(event.raw.lng)]).concat([[point.lat, point.lng]]), { color: moving ? '#13a6a1' : '#4e7bf2', weight: 5, opacity: .72, dashArray: moving ? null : '7 8' }).addTo(liveMap));
   });
   const count = document.getElementById('mapDeviceCount'); if (count) count.textContent = `${points.length} live device${points.length === 1 ? '' : 's'}`;
   const sync = document.getElementById('mapSync'); if (sync) sync.textContent = points.length ? `Updated ${new Date().toLocaleTimeString()}` : 'Waiting for GPS data';
@@ -137,7 +146,7 @@ function renderDevicePanel() {
 
 function renderView(view = state.view) {
   state.view = view;
-  if (liveMap) { liveMap.remove(); liveMap = null; liveMapViewKey = ''; }
+  if (liveMap) { liveMap.remove(); liveMap = null; liveMapViewKey = ''; liveMarkers.clear(); liveTrailLayers = []; }
   const meta = viewMeta[view];
   document.getElementById('breadcrumbCurrent').textContent = meta.title.replace('Good morning, Arjun', 'Overview');
   document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
