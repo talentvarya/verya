@@ -125,7 +125,7 @@ function renderDevicePanel() {
     const badge = status === 'Moving' ? 'live' : status === 'Offline' ? 'warning' : 'parked';
     const lastSeen = link.lastSeen ? new Date(link.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Not started';
     const position = link.lastPosition?.lat && link.lastPosition?.lng ? `<a class="text-button" href="https://www.google.com/maps/search/?api=1&query=${link.lastPosition.lat},${link.lastPosition.lng}" target="_blank" rel="noreferrer">Open location ↗</a>` : '';
-    return `<div class="activity-item"><span class="vehicle-photo" style="width:34px;height:34px;font-size:17px">♙</span><div><strong>${link.phone || 'Registered phone'}</strong><small>${link.vehicleId ? vehicleNames[link.vehicleId] || link.vehicleId : 'Phone only'} · Last seen ${lastSeen}${position ? ` · ${position}` : ''}</small></div><span class="badge ${badge}">● ${status}</span></div>`;
+    return `<div class="activity-item"><span class="vehicle-photo" style="width:34px;height:34px;font-size:17px">♙</span><div><strong>${link.phone || 'Registered phone'}</strong><small>${link.vehicleId ? vehicleNames[link.vehicleId] || link.vehicleId : 'Phone only'} · Last seen ${lastSeen}${position ? ` · ${position}` : ''}</small></div><span class="badge ${badge}">● ${status}</span><button class="btn btn-sm" data-device-remove="${link.id}" title="Remove device">Delete</button></div>`;
   }).join('') : '<div class="empty-state" style="padding:16px 0">No registered mobile devices yet.</div>';
   return `<section class="panel" style="margin-top:18px"><div class="panel-header"><div><div class="panel-title">Registered phones</div><div class="panel-subtitle">Live movement from consented mobile devices · refreshes every 5 seconds</div></div><span class="badge live">${links.length} connected</span></div><div class="activity-list">${rows}</div></section>`;
 }
@@ -147,6 +147,7 @@ function renderView(view = state.view) {
   else pageWrap.innerHTML = renderSettings();
   pageWrap.querySelectorAll('[data-nav]').forEach(el => el.addEventListener('click', () => renderView(el.dataset.nav)));
   pageWrap.querySelectorAll('[data-vehicle]').forEach(el => el.addEventListener('click', () => { state.selectedVehicle = Number(el.dataset.vehicle); showToast(`${vehicles[state.selectedVehicle].name} selected`); renderView('home'); }));
+  pageWrap.querySelectorAll('[data-device-remove]').forEach(el => el.addEventListener('click', () => removeDevice(el.dataset.deviceRemove)));
   pageWrap.querySelectorAll('[data-action]').forEach(el => el.addEventListener('click', () => handleAction(el.dataset.action)));
   requestAnimationFrame(refreshLiveMap);
 }
@@ -198,6 +199,18 @@ function handleAction(action) {
 function openGeofenceModal() {
   openModal('Add a geofence', '<p>Geofences create calm, auditable boundaries for home, office, school or depot locations.</p><form id="geofenceForm" class="modal-form"><label>Geofence name<input name="name" required placeholder="e.g. Office parking" /></label><label>Type<select name="type"><option>Custom</option><option>Office</option><option>School</option><option>Depot</option></select></label><div class="modal-actions"><button type="button" class="btn" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Create geofence</button></div></form>');
   document.getElementById('geofenceForm').addEventListener('submit', async event => { event.preventDefault(); const payload = Object.fromEntries(new FormData(event.currentTarget)); const response = await fetch('/api/geofences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); const result = await response.json(); if (!response.ok) return showToast(result.error); closeModal(); showToast(`${result.name} geofence created`); await loadBootstrap(); renderView('security'); });
+}
+
+async function removeDevice(deviceId) {
+  if (!deviceId || !window.confirm('Remove this device? It will stop sending locations.')) return;
+  try {
+    const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not remove device');
+    showToast('Device removed. Its tracking token is no longer valid.');
+    await loadBootstrap();
+    renderView('home');
+  } catch (error) { showToast(error.message); }
 }
 
 function openInviteModal() {

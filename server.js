@@ -133,7 +133,7 @@ function deny(res, action) { return send(res, 403, { error: `Current role cannot
 async function handler(req, res) {
   const parsed = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = parsed.pathname;
-  if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, X-Device-Token', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS' }); return res.end(); }
+  if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, X-Device-Token', 'Access-Control-Allow-Methods': 'DELETE,GET,POST,PATCH,OPTIONS' }); return res.end(); }
 
   try {
     if (pathname === '/api/auth/signup' && req.method === 'POST') {
@@ -199,6 +199,13 @@ async function handler(req, res) {
       if (pending.mode === 'supabase') { try { const auth = await supabaseAuthRequest('verify', { phone, token: String(input.code || ''), type: 'sms' }); userId = auth.user?.id || userId; } catch (error) { return send(res, 401, { error: error.message }); } }
       else if (String(input.code || '') !== pending.code) return send(res, 401, { error: 'Incorrect demo OTP.' });
       const data = await readData(); const vehicle = pending.vehicleId ? data.vehicles.find(item => item.id === pending.vehicleId) : null; const deviceToken = createDeviceToken(); const deviceLink = { id: `DL-${Date.now()}`, phone: maskPhone(phone), vehicleId: vehicle?.id || null, userId, mode: pending.mode, pairedAt: new Date().toISOString(), status: 'Stopped', speed: 0, lastSeen: null, lastPosition: null, deviceTokenHash: hashDeviceToken(deviceToken) }; data.deviceLinks.push(deviceLink); data.deviceLinks = data.deviceLinks.slice(-20); audit(data, `Paired ${maskPhone(phone)} as a mobile device${vehicle ? ` for ${vehicle.name}` : ''}.`); await writeData(data); pendingPhoneOtps.delete(phone); return send(res, 200, { paired: true, deviceLinkId: deviceLink.id, deviceToken, vehicleId: vehicle?.id || null, vehicleName: vehicle?.name || null, phone: deviceLink.phone, mode: pending.mode, userId });
+    }
+    const deviceMatch = pathname.match(/^\/api\/devices\/([^/]+)$/);
+    if (deviceMatch && req.method === 'DELETE') {
+      const data = await readData(); if (!can(data, 'manageVehicles')) return deny(res, 'delete devices');
+      const index = data.deviceLinks.findIndex(item => item.id === decodeURIComponent(deviceMatch[1]));
+      if (index < 0) return send(res, 404, { error: 'Device not found.' });
+      const [removed] = data.deviceLinks.splice(index, 1); audit(data, `Removed mobile device ${removed.phone}.`); await writeData(data); return send(res, 200, { deleted: true, deviceLinkId: removed.id });
     }
     if (pathname === '/api/audit' && req.method === 'GET') return send(res, 200, (await readData()).audit);
     if (pathname === '/api/geofences' && req.method === 'GET') return send(res, 200, (await readData()).geofences);
