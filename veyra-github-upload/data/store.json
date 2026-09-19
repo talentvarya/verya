@@ -1,0 +1,179 @@
+{
+  "summary": {
+    "distance": "267.4 km",
+    "driving": "8 h 12 m",
+    "idle": "42 m",
+    "alerts": 2
+  },
+  "vehicles": [
+    {
+      "id": "DL01AB1234",
+      "name": "Toyota Innova",
+      "icon": "🚙",
+      "status": "Moving",
+      "statusClass": "status-live",
+      "location": "Outer Ring Road · 2 min ago",
+      "speed": "48 km/h",
+      "km": "186.4 km",
+      "last": "Live now",
+      "source": "GPS tracker",
+      "capabilities": [
+        "GPS",
+        "Ignition",
+        "Accelerometer"
+      ]
+    },
+    {
+      "id": "DL02CD7788",
+      "name": "Hyundai Creta",
+      "icon": "🚗",
+      "status": "Parked",
+      "statusClass": "status-parked",
+      "location": "Home garage · 14 min ago",
+      "speed": "—",
+      "km": "42.8 km",
+      "last": "14 min ago",
+      "source": "GPS tracker",
+      "capabilities": [
+        "GPS",
+        "Ignition"
+      ]
+    },
+    {
+      "id": "DL03EF9012",
+      "name": "Tata Nexon EV",
+      "icon": "⚡",
+      "status": "Moving",
+      "statusClass": "status-live",
+      "location": "Normalized webhook position · just now",
+      "speed": "28.8 km/h",
+      "km": "38.2 km",
+      "last": "Just now",
+      "source": "EV connector",
+      "capabilities": [
+        "GPS",
+        "EV telemetry"
+      ],
+      "position": {
+        "lat": 28.56742691622698,
+        "lng": 77.21033180341131,
+        "accuracy": 15,
+        "source": "Mobile test location"
+      }
+    }
+  ],
+  "alerts": [
+    {
+      "id": "A-101",
+      "family": "Connectivity",
+      "title": "Device offline · Hyundai Creta",
+      "detail": "Last known location: Home garage · 14 min ago",
+      "severity": "Medium",
+      "state": "Open"
+    },
+    {
+      "id": "A-102",
+      "family": "Safety",
+      "title": "Sustained overspeed · Toyota Innova",
+      "detail": "92 km/h for 48 sec · Outer Ring Road · 10:31 AM",
+      "severity": "Low",
+      "state": "Acknowledged"
+    }
+  ],
+  "members": [
+    {
+      "name": "Arjun Rao",
+      "role": "Owner",
+      "scope": "All vehicles",
+      "state": "Active"
+    },
+    {
+      "name": "Meera Rao",
+      "role": "Household member",
+      "scope": "2 vehicles",
+      "state": "Active"
+    },
+    {
+      "name": "Rohan Mehta",
+      "role": "Viewer",
+      "scope": "Pending invite",
+      "state": "Pending"
+    }
+  ],
+  "audit": [
+    {
+      "time": "08:42 pm",
+      "actor": "Arjun Rao",
+      "action": "Ingested a normalized position event for Tata Nexon EV."
+    },
+    {
+      "time": "08:41 pm",
+      "actor": "Arjun Rao",
+      "action": "Paired +91••••0555 as a mobile device for Tata Nexon EV."
+    },
+    {
+      "time": "08:38 pm",
+      "actor": "Arjun Rao",
+      "action": "Paired +91••••0555 as a mobile device for Toyota Innova."
+    },
+    {
+      "time": "10:42 AM",
+      "actor": "System",
+      "action": "Connected 3 devices and refreshed activity metrics."
+    }
+  ],
+  "settings": {
+    "waitingGraceMinutes": 5,
+    "parkingThresholdMinutes": 10,
+    "timezone": "Asia/Calcutta"
+  },
+  "session": {
+    "user": "Arjun Rao",
+    "role": "owner",
+    "workspace": "Home garage"
+  },
+  "geofences": [
+    {
+      "id": "G-001",
+      "name": "Home garage",
+      "type": "Home",
+      "status": "Active"
+    }
+  ],
+  "events": [
+    {
+      "eventId": "MOBILE-1789830769020",
+      "vehicleId": "DL03EF9012",
+      "type": "position",
+      "receivedAt": "2026-09-19T15:12:49.027Z",
+      "quality": "Measured",
+      "raw": {
+        "eventId": "MOBILE-1789830769020",
+        "vehicleId": "DL03EF9012",
+        "lat": 28.56742691622698,
+        "lng": 77.21033180341131,
+        "accuracy": 15,
+        "speed": 28.8,
+        "source": "Mobile test location"
+      }
+    }
+  ],
+  "deviceLinks": [
+    {
+      "id": "DL-1789830532396",
+      "phone": "+91••••0555",
+      "vehicleId": "DL01AB1234",
+      "userId": "demo-NTA1MDU1NQ",
+      "mode": "demo",
+      "pairedAt": "2026-09-19T15:08:52.396Z"
+    },
+    {
+      "id": "DL-1789830695615",
+      "phone": "+91••••0555",
+      "vehicleId": "DL03EF9012",
+      "userId": "demo-NTA1MDU1NQ",
+      "mode": "demo",
+      "pairedAt": "2026-09-19T15:11:35.615Z"
+    }
+  ]
+}
