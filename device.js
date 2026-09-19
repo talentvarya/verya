@@ -39,7 +39,18 @@ async function sendTestLocation() {
   try { await sendPosition({ coords: { latitude: Number(base.lat) + (Math.random() - .5) / 1000, longitude: Number(base.lng) + (Math.random() - .5) / 1000, accuracy: 15, speed: 8 } }, 'Mobile test location'); } catch (error) { setStatus(error.message, 'error'); }
 }
 async function loadVehicles() {
-  try { const response = await fetch('/api/bootstrap'); const data = await response.json(); vehicles = data.vehicles || []; vehicleSelect.innerHTML = `<option value="">Phone only — no vehicle selected</option>${vehicles.map(vehicle => `<option value="${vehicle.id}">${vehicle.name} · ${vehicle.id}</option>`).join('')}`; setStatus('Ready to connect'); } catch (error) { setStatus('Could not reach Veyra server.', 'error'); }
+  try {
+    const response = await fetch('/api/bootstrap');
+    if (!response.ok) throw new Error('Vehicle list requires admin login');
+    const data = await response.json();
+    vehicles = data.vehicles || [];
+    vehicleSelect.innerHTML = `<option value="">Phone only — no vehicle selected</option>${vehicles.map(vehicle => `<option value="${vehicle.id}">${vehicle.name} · ${vehicle.id}</option>`).join('')}`;
+    setStatus('Ready to connect');
+  } catch (error) {
+    vehicles = [];
+    vehicleSelect.innerHTML = '<option value="">Phone only — no vehicle selected</option>';
+    setStatus('Ready to connect phone GPS');
+  }
 }
 async function requestOtp() {
   const vehicle = selectedVehicle(); otpPhone = phoneInput.value.trim(); if (!otpPhone) return pairingStatus.textContent = 'Enter your mobile number first.';
