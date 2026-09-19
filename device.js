@@ -1,3 +1,9 @@
+const isMobileDevice = /Android|iPhone|iPad|iPod|Windows Phone|Mobile/i.test(navigator.userAgent) || window.matchMedia('(max-width: 700px)').matches;
+if (!isMobileDevice) {
+  document.body.innerHTML = `<main style="min-height:100vh;display:grid;place-items:center;padding:24px;background:#f5f7fb;font-family:Inter,system-ui,sans-serif;color:#10233f"><section style="max-width:440px;padding:32px;border:1px solid #dfe5ef;border-radius:20px;background:#fff;box-shadow:0 18px 40px #10233f12;text-align:center"><div style="font-size:42px">📱</div><h1 style="margin:12px 0 8px">Open this page on the tracker phone</h1><p style="margin:0;color:#64748b;line-height:1.6">Veyra device mode uses this phone’s GPS. Open the same link on the mobile phone you want to track.</p><p style="margin:18px 0 0;color:#64748b">Use the desktop browser for the admin dashboard.</p></section></main>`;
+  throw new Error('Veyra device mode is available on mobile only.');
+}
+
 const vehicleSelect = document.getElementById('vehicleSelect');
 const startButton = document.getElementById('startButton');
 const testButton = document.getElementById('testButton');
