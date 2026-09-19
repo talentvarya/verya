@@ -1,0 +1,13 @@
+{
+  "name": "Veyra Mobile Tracker",
+  "short_name": "Veyra",
+  "description": "Consent-based live location sharing for Veyra vehicle tracking.",
+  "start_url": "/device.html",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f8f8",
+  "theme_color": "#0b1324",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
