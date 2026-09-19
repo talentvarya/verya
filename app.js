@@ -323,7 +323,7 @@ function openModal(title, body) { document.getElementById('modalContent').innerH
 function closeModal() { document.getElementById('modalBackdrop').hidden = true; }
 function showToast(message) { clearTimeout(toastTimer); document.getElementById('toastMessage').textContent = message; toast.classList.add('show'); toastTimer = setTimeout(() => toast.classList.remove('show'), 2700); }
 
-document.getElementById('primaryNav').addEventListener('click', e => { const btn = e.target.closest('[data-view]'); if (btn) { renderView(btn.dataset.view); document.getElementById('sidebar').classList.remove('open'); } });
+document.getElementById('sidebar').addEventListener('click', e => { const btn = e.target.closest('[data-view]'); if (btn) { renderView(btn.dataset.view); document.getElementById('sidebar').classList.remove('open'); } });
 document.getElementById('workspaceSwitcher').addEventListener('click', () => showToast('Fleet workspace selected'));
 document.getElementById('mobileMenu').addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
 document.getElementById('modalClose').addEventListener('click', closeModal);
