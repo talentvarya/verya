@@ -50,6 +50,7 @@ async function loadBootstrap({ render = true } = {}) {
     document.querySelector('.alert-count').textContent = (liveData.alerts || []).filter(alert => alert.state === 'Open').length;
     if (render) renderView(state.view);
     else refreshLiveMap();
+    refreshCameraFeeds();
   } catch (error) { showToast('Could not load your fleet.'); }
 }
 
@@ -80,7 +81,7 @@ function renderHome() {
 
 function renderCameraPanel() {
   const links = liveData?.deviceLinks || [];
-  const cards = links.length ? links.map(link => `<article class="camera-card"><div class="camera-preview"><div class="camera-preview-icon">▣</div><strong>Camera not connected</strong><small>Enable camera on ${link.phone || 'this device'}</small><span class="camera-watermark">VEYRA · ADMIN VIEW</span></div><div class="camera-card-footer"><div><strong>${link.phone || 'Registered device'}</strong><small>One-way vehicle camera · permission required</small></div><button class="btn btn-sm btn-primary" data-camera-connect="${link.id}">Connect camera</button></div></article>`).join('') : '<div class="camera-empty"><span class="camera-preview-icon">▣</span><strong>No camera devices connected</strong><small>Pair a phone first, then connect its vehicle camera.</small></div>';
+  const cards = links.length ? links.map(link => `<article class="camera-card"><div class="camera-preview"><img class="camera-feed" data-camera-feed="${link.id}" alt="Live vehicle camera" hidden><div class="camera-placeholder" data-camera-placeholder><div class="camera-preview-icon">▣</div><strong>Camera not connected</strong><small>Enable camera on ${link.phone || 'this device'}</small></div><span class="camera-watermark">VEYRA · ADMIN VIEW</span></div><div class="camera-card-footer"><div><strong>${link.phone || 'Registered device'}</strong><small data-camera-state>One-way vehicle camera · permission required</small></div><button class="btn btn-sm btn-primary" data-camera-connect="${link.id}">Connect camera</button></div></article>`).join('') : '<div class="camera-empty"><span class="camera-preview-icon">▣</span><strong>No camera devices connected</strong><small>Pair a phone first, then connect its vehicle camera.</small></div>';
   return `<section class="panel camera-panel"><div class="panel-header"><div><div class="panel-title">Vehicle cameras</div><div class="panel-subtitle">Authorized one-way live view · camera permission and active indicator required</div></div><span class="badge parked">Admin view only</span></div><div class="camera-grid">${cards}</div><div class="camera-notice">⌁ Camera use is visible on the device. The device camera cannot see the admin dashboard.</div></section>`;
 }
 
@@ -260,6 +261,11 @@ function downloadReport() {
 
 function openCameraConsentModal(deviceId) {
   openModal('Connect vehicle camera', `<p>This enables a one-way camera view for the authorized admin. The phone owner must grant camera permission, and Android will show a visible camera-active indicator while streaming.</p><div class="modal-list"><div class="modal-check"><span>✓</span><span>Admin can view the vehicle camera</span></div><div class="modal-check"><span>✓</span><span>Phone user cannot view the admin dashboard camera feed</span></div><div class="modal-check warning"><span>!</span><span>Camera permission and visible active status are required</span></div></div><div class="modal-actions"><button class="btn" data-modal-close>Cancel</button><button class="btn btn-primary" data-modal-save>Continue on device</button></div>`);
+}
+
+async function refreshCameraFeeds() {
+  const feeds = [...document.querySelectorAll('[data-camera-feed]')];
+  await Promise.all(feeds.map(async feed => { try { const response = await fetch(`/api/camera/${encodeURIComponent(feed.dataset.cameraFeed)}`); if (!response.ok) return; const frame = await response.json(); if (!frame.image) return; feed.src = `data:${frame.contentType || 'image/jpeg'};base64,${frame.image}`; feed.hidden = false; const card = feed.closest('.camera-card'); card?.querySelector('[data-camera-placeholder]')?.setAttribute('hidden', ''); const state = card?.querySelector('[data-camera-state]'); if (state) state.textContent = `Live snapshot · ${new Date(frame.receivedAt).toLocaleTimeString()}`; } catch (_) {} }));
 }
 
 function openGeofenceModal() {

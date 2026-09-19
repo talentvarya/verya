@@ -33,6 +33,7 @@ const SMSLOCAL_API_URL = process.env.SMSLOCAL_API_URL || 'https://app.smslocal.i
 const SMSLOCAL_ENABLED = Boolean(SMSLOCAL_API_KEY && SMSLOCAL_SENDER_ID && SMSLOCAL_DLT_TEMPLATE_ID);
 const pendingPhoneOtps = new Map();
 const requestWindows = new Map();
+const cameraFrames = new Map();
 
 const initialData = {
   summary: { distance: '0 km', driving: '0 h 00 m', idle: '0 m', alerts: 0 },
@@ -196,7 +197,7 @@ async function handler(req, res) {
     if (pathname === '/api/auth/logout' && req.method === 'POST') return send(res, 200, { ok: true }, 'application/json; charset=utf-8', { 'Set-Cookie': [`veyra_access_token=; ${cookieOptions(0)}`, `veyra_refresh_token=; ${cookieOptions(0)}`] });
     if (pathname === '/api/auth/me' && req.method === 'GET') { const user = await requireAuth(req, res); if (!user) return; return send(res, 200, { id: user.id, email: user.email }); }
 
-    const publicApi = pathname === '/api/health' || pathname === '/api/phone/request' || pathname === '/api/phone/verify' || pathname === '/api/ingest/position';
+    const publicApi = pathname === '/api/health' || pathname === '/api/phone/request' || pathname === '/api/phone/verify' || pathname === '/api/ingest/position' || pathname === '/api/ingest/camera';
     if (pathname.startsWith('/api/') && !publicApi) { const user = await requireAuth(req, res); if (!user) return; }
 
     if (pathname === '/api/health' && req.method === 'GET') return send(res, 200, { ok: true, service: 'veyra-local-mvp', persistence: SUPABASE_ENABLED ? 'supabase' : 'local-json', time: new Date().toISOString() });
@@ -282,6 +283,17 @@ async function handler(req, res) {
     if (pathname === '/api/ingest/position' && req.method === 'POST') {
       const data = await readData(); if (!can(data, 'ingest')) return deny(res, 'ingest position events'); const input = await body(req); const link = input.deviceLinkId ? data.deviceLinks.find(item => item.id === input.deviceLinkId) : null; if (link && !deviceTokenMatches(req, input, link)) return send(res, 401, { error: 'This device is not authorized. Pair it again.' }); const vehicle = data.vehicles.find(item => item.id === input.vehicleId) || (link?.vehicleId ? data.vehicles.find(item => item.id === link.vehicleId) : null); if (!vehicle && !link) return send(res, 404, { error: 'Vehicle or paired device not found.' });
       const lat = Number(input.lat); const lng = Number(input.lng); const speed = Math.max(0, Number(input.speed || 0)); const accuracy = Math.max(0, Number(input.accuracy || 20)); if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) return send(res, 400, { error: 'A valid latitude and longitude are required.' }); if (!Number.isFinite(speed) || !Number.isFinite(accuracy)) return send(res, 400, { error: 'Speed and accuracy must be valid numbers.' }); const position = { lat, lng, accuracy, source: input.source || 'Webhook' }; const previousPosition = link?.lastPosition || vehicle?.position; const moving = speed > 3 || (distanceMeters(previousPosition, position) > Math.max(accuracy, 12)); if (vehicle) { vehicle.position = position; vehicle.speed = `${speed} km/h`; vehicle.status = moving ? 'Moving' : 'Parked'; vehicle.statusClass = vehicle.status === 'Moving' ? 'status-live' : 'status-parked'; vehicle.last = 'Just now'; vehicle.location = input.location || 'Normalized webhook position · just now'; } if (link) { link.lastPosition = position; link.speed = speed; link.status = moving ? 'Moving' : 'Stopped'; link.lastSeen = new Date().toISOString(); } data.events.unshift({ eventId: input.eventId || `EV-${Date.now()}`, vehicleId: vehicle?.id || null, deviceLinkId: link?.id || input.deviceLinkId || null, type: 'position', receivedAt: new Date().toISOString(), quality: 'Measured', raw: input }); data.events = data.events.slice(0, 50); audit(data, `Ingested a normalized position event for ${vehicle?.name || link?.phone || 'mobile device'}.`); await writeData(data); return send(res, 200, vehicle || { id: link.id, name: link.phone, status: link.status, speed: `${speed} km/h`, position });
+    }
+    if (pathname === '/api/ingest/camera' && req.method === 'POST') {
+      const input = await body(req); const data = await readData(); const link = input.deviceLinkId ? data.deviceLinks.find(item => item.id === input.deviceLinkId) : null;
+      if (!link) return send(res, 404, { error: 'Paired device not found.' });
+      if (!deviceTokenMatches(req, input, link)) return send(res, 401, { error: 'This device is not authorized. Pair it again.' });
+      const image = String(input.image || ''); if (!/^[A-Za-z0-9+/=]+$/.test(image) || image.length > 350000) return send(res, 400, { error: 'Camera frame is invalid or too large.' });
+      cameraFrames.set(link.id, { image, contentType: 'image/jpeg', receivedAt: new Date().toISOString() }); return send(res, 200, { ok: true, receivedAt: cameraFrames.get(link.id).receivedAt });
+    }
+    const cameraMatch = pathname.match(/^\/api\/camera\/([^/]+)$/);
+    if (cameraMatch && req.method === 'GET') {
+      const frame = cameraFrames.get(decodeURIComponent(cameraMatch[1])); if (!frame) return send(res, 404, { error: 'No camera frame available.' }); return send(res, 200, frame);
     }
 
     if (req.method === 'GET') {
