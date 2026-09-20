@@ -116,12 +116,27 @@ function acceptedDistanceMeters(a, b) {
   const maxStep = Math.max(150, plausibleSpeedKph / 3.6 * gapSeconds);
   return step > maxStep ? null : step;
 }
-function historicalDistanceMeters(data) {
+function distanceTotalsByKey(data) {
   const samples = new Map();
   (data.events || []).forEach(event => { const raw = event.raw || {}; const lat = Number(raw.lat); const lng = Number(raw.lng); if (!Number.isFinite(lat) || !Number.isFinite(lng)) return; const key = event.deviceLinkId || event.vehicleId || 'fleet'; if (!samples.has(key)) samples.set(key, []); samples.get(key).push({ lat, lng, accuracy: Number(raw.accuracy || 20), speed: Number(raw.speed || 0), receivedAt: new Date(event.receivedAt || 0).getTime() }); });
-  let total = 0;
-  samples.forEach(items => { items.sort((a, b) => a.receivedAt - b.receivedAt); for (let index = 1; index < items.length; index += 1) { const step = acceptedDistanceMeters(items[index - 1], items[index]); if (step !== null) total += step; } });
-  return total;
+  const totals = new Map();
+  samples.forEach((items, key) => { items.sort((a, b) => a.receivedAt - b.receivedAt); let total = 0; for (let index = 1; index < items.length; index += 1) { const step = acceptedDistanceMeters(items[index - 1], items[index]); if (step !== null) total += step; } totals.set(key, total); });
+  return totals;
+}
+function historicalDistanceMeters(data) {
+  return [...distanceTotalsByKey(data).values()].reduce((total, meters) => total + meters, 0);
+}
+function migrateDistanceTotals(data) {
+  if (data.distanceFilterVersion === 2) return;
+  const totals = distanceTotalsByKey(data);
+  data.distanceMetersTotal = historicalDistanceMeters(data);
+  (data.vehicles || []).forEach(vehicle => {
+    const keys = new Set([vehicle.id, ...(data.deviceLinks || []).filter(link => link.vehicleId === vehicle.id).map(link => link.id)]);
+    const meters = [...keys].reduce((total, key) => total + Number(totals.get(key) || 0), 0);
+    vehicle.distanceMetersTotal = meters;
+    vehicle.km = `${(meters / 1000).toFixed(1)} km`;
+  });
+  data.distanceFilterVersion = 2;
 }
 function formatDuration(milliseconds) { const minutes = Math.max(0, Math.floor(milliseconds / 60000)); return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} m`; }
 function updateOverspeedAlert(data, { vehicle, link, speed }) {
@@ -136,6 +151,7 @@ function updateOverspeedAlert(data, { vehicle, link, speed }) {
   } else if (openAlert) { openAlert.state = 'Resolved'; openAlert.resolvedAt = new Date().toISOString(); openAlert.detail = `${subject} returned to ${speed} km/h; overspeed warning resolved.`; audit(data, `Resolved overspeed warning for ${subject}.`); }
 }
 function refreshSummary(data) {
+  migrateDistanceTotals(data);
   if (!Number.isFinite(Number(data.distanceMetersTotal))) data.distanceMetersTotal = historicalDistanceMeters(data);
   const since = Date.now() - 24 * 60 * 60 * 1000;
   const samples = new Map();
