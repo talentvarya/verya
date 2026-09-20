@@ -27,12 +27,37 @@ const liveMarkerStates = new Map();
 const liveMarkerHeadings = new Map();
 let liveTrailLayers = [];
 let googleTrailLayers = [];
+let notificationBaselineReady = false;
+let knownOpenAlertIds = new Set();
 const pageWrap = document.getElementById('pageWrap');
 const toast = document.getElementById('toast');
 let toastTimer;
 
 function icon(symbol, cls = '') { return `<span class="timeline-dot ${cls}">${symbol}</span>`; }
 function alertDateTime(alert) { const value = alert.createdAt || alert.lastSeenAt || alert.resolvedAt; return value ? new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : 'Date/time unavailable'; }
+function updateNotificationBell(alerts = []) {
+  const openAlerts = alerts.filter(alert => alert.state === 'Open');
+  const badge = document.getElementById('notificationBadge');
+  const button = document.getElementById('notificationButton');
+  if (badge) { badge.textContent = openAlerts.length > 99 ? '99+' : String(openAlerts.length); badge.hidden = openAlerts.length === 0; }
+  if (button) button.setAttribute('aria-label', openAlerts.length ? `${openAlerts.length} active warning${openAlerts.length === 1 ? '' : 's'}` : 'No active warnings');
+  const fresh = openAlerts.filter(alert => !knownOpenAlertIds.has(alert.id));
+  if (notificationBaselineReady && fresh.length) {
+    const alert = fresh[0];
+    showToast(`${alert.title}: ${alert.detail}`);
+    if ('Notification' in window && Notification.permission === 'granted') new Notification(alert.title, { body: `${alert.detail}\n${alertDateTime(alert)}`, tag: alert.id });
+  }
+  knownOpenAlertIds = new Set(openAlerts.map(alert => alert.id));
+  notificationBaselineReady = true;
+}
+async function enableBrowserNotifications() {
+  if (!('Notification' in window)) { showToast('Browser notifications are not supported here.'); return; }
+  if (Notification.permission === 'default') {
+    const permission = await Notification.requestPermission();
+    showToast(permission === 'granted' ? 'Warning notifications enabled' : 'Notification permission was not allowed');
+  } else if (Notification.permission === 'granted') showToast('Warning notifications are already enabled');
+  else showToast('Enable notifications from the browser address-bar settings');
+}
 function statCard(label, value, meta, glyph, color = '') { return `<article class="stat-card"><div class="stat-top"><span class="stat-label">${label}</span><span class="stat-icon ${color}">${glyph}</span></div><div class="stat-value" data-stat="${label}">${value}</div><div class="stat-meta">${meta}</div></article>`; }
 function pageHeading(meta, actions = '') { return `<div class="page-heading"><div><div class="eyebrow">${meta.eyebrow}</div><h1>${meta.title}</h1><p>${meta.subtitle}</p></div><div class="heading-actions">${actions}</div></div>`; }
 function refreshSummaryCards() { const summary = liveData?.summary || {}; const values = { 'Total distance': summary.distance || '0.00 km', 'Driving time': summary.driving || '0 h 00 m', 'Idle time': summary.idle || '0 m', 'Active alerts': String(summary.alerts || 0), 'Distance travelled': summary.distance || '0.00 km', 'Running time': summary.driving || '0 h 00 m' }; document.querySelectorAll('[data-stat]').forEach(card => { if (values[card.dataset.stat] !== undefined) card.textContent = values[card.dataset.stat]; }); }
@@ -91,7 +116,9 @@ async function loadBootstrap({ render = true } = {}) {
     document.getElementById('topInitials').textContent = initials;
     document.getElementById('planSummary').textContent = `${vehicles.length} vehicle${vehicles.length === 1 ? '' : 's'} connected`;
     document.querySelector('[data-view="vehicles"] .nav-count').textContent = vehicles.length;
-    document.querySelector('.alert-count').textContent = (liveData.alerts || []).filter(alert => alert.state === 'Open').length;
+    const alerts = liveData.alerts || [];
+    document.querySelector('.alert-count').textContent = alerts.filter(alert => alert.state === 'Open').length;
+    updateNotificationBell(alerts);
     if (render) renderView(state.view);
     else { refreshLiveMap(); refreshSummaryCards(); }
     refreshCameraFeeds();
@@ -495,7 +522,7 @@ document.getElementById('mobileMenu').addEventListener('click', () => document.g
 document.getElementById('modalClose').addEventListener('click', closeModal);
 document.getElementById('modalBackdrop').addEventListener('click', e => { if (e.target.id === 'modalBackdrop') closeModal(); });
 document.getElementById('helpButton').addEventListener('click', () => openModal('Need a hand?', '<p>Veyra keeps tracking, activity intelligence, security and access in one calm workspace. Choose a screen from the left to explore the prototype.</p><div class="modal-actions"><button class="btn btn-primary" data-modal-close>Got it</button></div>'));
-document.getElementById('notificationButton').addEventListener('click', () => { renderView('security'); showToast('Showing current security alerts'); });
+document.getElementById('notificationButton').addEventListener('click', async () => { await enableBrowserNotifications(); renderView('security'); });
 document.getElementById('logoutButton').addEventListener('click', async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.href = '/login.html'; });
 renderView('home');
 loadBootstrap();
