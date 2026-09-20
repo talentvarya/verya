@@ -42,7 +42,7 @@ const initialData = {
   alerts: [],
   members: [],
   audit: [],
-  settings: { waitingGraceMinutes: 5, parkingThresholdMinutes: 10, timezone: 'Asia/Calcutta' },
+  settings: { waitingGraceMinutes: 5, parkingThresholdMinutes: 10, overspeedThresholdKph: 90, timezone: 'Asia/Calcutta' },
   session: { user: '', role: 'owner', workspace: 'Fleet workspace' },
   geofences: [],
   events: []
@@ -57,6 +57,9 @@ function normalizeData(data) {
   data.session ||= { user: 'Arjun Rao', role: 'owner', workspace: 'Home garage' };
   data.geofences ||= [{ id: 'G-001', name: 'Home garage', type: 'Home', status: 'Active' }];
   data.events ||= [];
+  data.alerts ||= [];
+  data.settings ||= {};
+  data.settings.overspeedThresholdKph ??= 90;
   data.deviceLinks ||= [];
   refreshSummary(data);
   return data;
@@ -110,6 +113,17 @@ function historicalDistanceMeters(data) {
   return total;
 }
 function formatDuration(milliseconds) { const minutes = Math.max(0, Math.floor(milliseconds / 60000)); return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} m`; }
+function updateOverspeedAlert(data, { vehicle, link, speed }) {
+  const threshold = Number(data.settings?.overspeedThresholdKph || 90);
+  const targetId = link?.id || vehicle?.id;
+  if (!targetId) return;
+  const subject = vehicle?.name || link?.phone || 'Connected device';
+  const openAlert = (data.alerts || []).find(alert => alert.type === 'overspeed' && alert.targetId === targetId && alert.state === 'Open');
+  if (speed > threshold) {
+    if (openAlert) { openAlert.speed = speed; openAlert.lastSeenAt = new Date().toISOString(); openAlert.detail = `${subject} is travelling at ${speed} km/h, above the ${threshold} km/h limit.`; }
+    else { const alert = { id: `A-${Date.now()}`, type: 'overspeed', targetId, vehicleId: vehicle?.id || null, deviceLinkId: link?.id || null, title: 'Overspeed warning', detail: `${subject} is travelling at ${speed} km/h, above the ${threshold} km/h limit.`, severity: 'High', state: 'Open', speed, threshold, createdAt: new Date().toISOString() }; data.alerts.unshift(alert); data.alerts = data.alerts.slice(0, 50); audit(data, `Overspeed warning for ${subject}: ${speed} km/h.`); }
+  } else if (openAlert) { openAlert.state = 'Resolved'; openAlert.resolvedAt = new Date().toISOString(); openAlert.detail = `${subject} returned to ${speed} km/h; overspeed warning resolved.`; audit(data, `Resolved overspeed warning for ${subject}.`); }
+}
 function refreshSummary(data) {
   if (!Number.isFinite(Number(data.distanceMetersTotal))) data.distanceMetersTotal = historicalDistanceMeters(data);
   const since = Date.now() - 24 * 60 * 60 * 1000;
@@ -306,7 +320,7 @@ async function handler(req, res) {
     }
     if (pathname === '/api/ingest/position' && req.method === 'POST') {
       const data = await readData(); if (!can(data, 'ingest')) return deny(res, 'ingest position events'); const input = await body(req); const link = input.deviceLinkId ? data.deviceLinks.find(item => item.id === input.deviceLinkId) : null; if (link && !deviceTokenMatches(req, input, link)) return send(res, 401, { error: 'This device is not authorized. Pair it again.' }); const vehicle = data.vehicles.find(item => item.id === input.vehicleId) || (link?.vehicleId ? data.vehicles.find(item => item.id === link.vehicleId) : null); if (!vehicle && !link) return send(res, 404, { error: 'Vehicle or paired device not found.' });
-      const lat = Number(input.lat); const lng = Number(input.lng); const speed = Math.max(0, Number(input.speed || 0)); const accuracy = Math.max(0, Number(input.accuracy || 20)); if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) return send(res, 400, { error: 'A valid latitude and longitude are required.' }); if (!Number.isFinite(speed) || !Number.isFinite(accuracy)) return send(res, 400, { error: 'Speed and accuracy must be valid numbers.' }); const position = { lat, lng, accuracy, source: input.source || 'Webhook' }; const previousPosition = link?.lastPosition || vehicle?.position; const stepMeters = distanceMeters(previousPosition, position); const moving = speed > 3 || stepMeters > Math.max(accuracy, 12); if (stepMeters > Math.max(accuracy, 12) && stepMeters <= 10000) data.distanceMetersTotal = Number(data.distanceMetersTotal || 0) + stepMeters; if (vehicle) { vehicle.position = position; vehicle.speed = `${speed} km/h`; vehicle.status = moving ? 'Moving' : 'Parked'; vehicle.statusClass = vehicle.status === 'Moving' ? 'status-live' : 'status-parked'; vehicle.last = 'Just now'; vehicle.location = input.location || 'Normalized webhook position · just now'; } if (link) { link.lastPosition = position; link.speed = speed; link.status = moving ? 'Moving' : 'Stopped'; link.lastSeen = new Date().toISOString(); } data.events.unshift({ eventId: input.eventId || `EV-${Date.now()}`, vehicleId: vehicle?.id || null, deviceLinkId: link?.id || input.deviceLinkId || null, type: 'position', receivedAt: new Date().toISOString(), quality: 'Measured', raw: input }); data.events = data.events.slice(0, 50); audit(data, `Ingested a normalized position event for ${vehicle?.name || link?.phone || 'mobile device'}.`); await writeData(data); return send(res, 200, vehicle || { id: link.id, name: link.phone, status: link.status, speed: `${speed} km/h`, position });
+      const lat = Number(input.lat); const lng = Number(input.lng); const speed = Math.max(0, Number(input.speed || 0)); const accuracy = Math.max(0, Number(input.accuracy || 20)); if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) return send(res, 400, { error: 'A valid latitude and longitude are required.' }); if (!Number.isFinite(speed) || !Number.isFinite(accuracy)) return send(res, 400, { error: 'Speed and accuracy must be valid numbers.' }); const position = { lat, lng, accuracy, source: input.source || 'Webhook' }; const previousPosition = link?.lastPosition || vehicle?.position; const stepMeters = distanceMeters(previousPosition, position); const moving = speed > 3 || stepMeters > Math.max(accuracy, 12); if (stepMeters > Math.max(accuracy, 12) && stepMeters <= 10000) data.distanceMetersTotal = Number(data.distanceMetersTotal || 0) + stepMeters; if (vehicle) { vehicle.position = position; vehicle.speed = `${speed} km/h`; vehicle.status = moving ? 'Moving' : 'Parked'; vehicle.statusClass = vehicle.status === 'Moving' ? 'status-live' : 'status-parked'; vehicle.last = 'Just now'; vehicle.location = input.location || 'Normalized webhook position · just now'; } if (link) { link.lastPosition = position; link.speed = speed; link.status = moving ? 'Moving' : 'Stopped'; link.lastSeen = new Date().toISOString(); } updateOverspeedAlert(data, { vehicle, link, speed }); data.events.unshift({ eventId: input.eventId || `EV-${Date.now()}`, vehicleId: vehicle?.id || null, deviceLinkId: link?.id || input.deviceLinkId || null, type: 'position', receivedAt: new Date().toISOString(), quality: 'Measured', raw: input }); data.events = data.events.slice(0, 50); audit(data, `Ingested a normalized position event for ${vehicle?.name || link?.phone || 'mobile device'}.`); await writeData(data); return send(res, 200, vehicle || { id: link.id, name: link.phone, status: link.status, speed: `${speed} km/h`, position });
     }
     if (pathname === '/api/ingest/camera' && req.method === 'POST') {
       const input = await body(req); const data = await readData(); const link = input.deviceLinkId ? data.deviceLinks.find(item => item.id === input.deviceLinkId) : null;
