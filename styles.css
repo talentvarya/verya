@@ -83,3 +83,4 @@ button { cursor: pointer; }
 .veyra-marker-icon { width: 32px; height: 46px; }
 .car-marker-svg { width: 32px; height: 46px; }
 .veyra-marker.moving::before { width: 38px; height: 48px; border-radius: 45%; transform: scale(.78); }
+.alert-time { display: block; margin-top: 4px; color: var(--muted-2); font-size: 9px; font-weight: 700; }
