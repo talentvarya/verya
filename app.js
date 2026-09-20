@@ -51,6 +51,26 @@ function markerTypePicker(point) {
   return `<div class="marker-popup"><strong>${point.name}</strong><small>${point.status} · ${point.speed}</small><span class="marker-popup-label">Marker type</span><div class="marker-type-picker">${options.map(type => `<button type="button" class="marker-type-option ${point.trackerType === type ? 'selected' : ''}" data-marker-type="${type}" data-marker-id="${point.id}"><span class="marker-type-symbol tracker-${type}">${trackerMarkerSvg(type)}</span>${trackerTypeLabel(type)}</button>`).join('')}</div></div>`;
 }
 function bearingDegrees(from, to) { const rad = Math.PI / 180; const y = Math.sin((to.lng - from.lng) * rad) * Math.cos(to.lat * rad); const x = Math.cos(from.lat * rad) * Math.sin(to.lat * rad) - Math.sin(from.lat * rad) * Math.cos(to.lat * rad) * Math.cos((to.lng - from.lng) * rad); return Math.atan2(y, x) * 180 / Math.PI; }
+function geoDistanceMeters(a, b) { const rad = Math.PI / 180; const dLat = (Number(b.lat) - Number(a.lat)) * rad; const dLng = (Number(b.lng) - Number(a.lng)) * rad; const h = Math.sin(dLat / 2) ** 2 + Math.cos(Number(a.lat) * rad) * Math.cos(Number(b.lat) * rad) * Math.sin(dLng / 2) ** 2; return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)); }
+function footprintEvents(pointId) {
+  const events = (liveData?.events || []).filter(event => (event.deviceLinkId === pointId || event.vehicleId === pointId) && Number.isFinite(Number(event.raw?.lat)) && Number.isFinite(Number(event.raw?.lng))).slice().sort((a, b) => new Date(a.receivedAt || 0) - new Date(b.receivedAt || 0));
+  const clean = [];
+  events.forEach(event => {
+    if (event.raw?.acceptedDistanceMeters === null) return;
+    const previous = clean[clean.length - 1];
+    if (previous) {
+      const previousRaw = previous.raw || {}; const currentRaw = event.raw || {};
+      const step = geoDistanceMeters(previousRaw, currentRaw);
+      const accuracy = Math.max(Number(previousRaw.accuracy || 20), Number(currentRaw.accuracy || 20), 12);
+      const gapSeconds = Math.max(1, Math.min(120, (new Date(event.receivedAt || 0).getTime() - new Date(previous.receivedAt || 0).getTime()) / 1000 || 10));
+      const speed = Math.max(Number(previousRaw.speed || 0), Number(currentRaw.speed || 0));
+      const plausibleSpeedKph = speed > 3 ? Math.max(speed * 1.8, 90) : 120;
+      if (step > Math.max(accuracy * 1.5, 15) && step > Math.max(150, plausibleSpeedKph / 3.6 * gapSeconds)) return;
+    }
+    clean.push(event);
+  });
+  return clean.slice(-24);
+}
 
 async function loadBootstrap({ render = true } = {}) {
   try {
@@ -149,7 +169,7 @@ async function refreshGoogleLiveMap(container) {
   googleTrailLayers.forEach(layer => layer.setMap(null)); googleTrailLayers = [];
   points.forEach(point => {
     const moving = point.status === 'Moving';
-    const trailEvents = (liveData?.events || []).filter(event => (event.deviceLinkId === point.id || event.vehicleId === point.id) && event.raw?.lat && event.raw?.lng).slice(0, 24).reverse();
+    const trailEvents = footprintEvents(point.id);
     const trailPoints = trailEvents.map(event => ({ lat: Number(event.raw.lat), lng: Number(event.raw.lng) }));
     if (trailPoints.length > 1) liveMarkerHeadings.set(point.id, bearingDegrees(trailPoints[trailPoints.length - 2], trailPoints[trailPoints.length - 1]));
     const heading = liveMarkerHeadings.get(point.id) || 0;
@@ -190,7 +210,7 @@ function refreshLiveMap() {
   liveTrailLayers = [];
   points.forEach(point => {
     const moving = point.status === 'Moving';
-    const trailEvents = (liveData?.events || []).filter(event => (event.deviceLinkId === point.id || event.vehicleId === point.id) && event.raw?.lat && event.raw?.lng).slice(0, 24).reverse();
+    const trailEvents = footprintEvents(point.id);
     const trailPoints = trailEvents.map(event => [Number(event.raw.lat), Number(event.raw.lng)]);
     if (trailPoints.length > 1) liveMarkerHeadings.set(point.id, bearingDegrees({ lat: trailPoints[trailPoints.length - 2][0], lng: trailPoints[trailPoints.length - 2][1] }, { lat: trailPoints[trailPoints.length - 1][0], lng: trailPoints[trailPoints.length - 1][1] }));
     const heading = liveMarkerHeadings.get(point.id) || 0;

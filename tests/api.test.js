@@ -27,6 +27,9 @@ async function request(route, options = {}) {
   const overspeed = await request('/api/ingest/position', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vehicleId: 'TEST0001', lat: 28.551, lng: 77.201, speed: 95, source: 'test-overspeed' }) }); assert.equal(overspeed.status, 200);
   const overspeedState = await request('/api/bootstrap'); assert.equal(overspeedState.json.summary.alerts, 1); assert.equal(overspeedState.json.alerts[0].type, 'overspeed');
   const safeSpeed = await request('/api/ingest/position', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vehicleId: 'TEST0001', lat: 28.552, lng: 77.202, speed: 80, source: 'test-safe-speed' }) }); assert.equal(safeSpeed.status, 200);
+  const beforeGpsJump = await request('/api/bootstrap'); const trackedVehicleBeforeJump = beforeGpsJump.json.vehicles.find(vehicle => vehicle.id === 'TEST0001');
+  const gpsJump = await request('/api/ingest/position', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vehicleId: 'TEST0001', lat: 28.65, lng: 77.30, speed: 0, source: 'test-gps-jump' }) }); assert.equal(gpsJump.status, 200);
+  const afterGpsJump = await request('/api/bootstrap'); const trackedVehicleAfterJump = afterGpsJump.json.vehicles.find(vehicle => vehicle.id === 'TEST0001'); assert.equal(trackedVehicleAfterJump.km, trackedVehicleBeforeJump.km);
   const durationData = JSON.parse(fs.readFileSync(dataFile, 'utf8')); const durationNow = Date.now();
   durationData.events.slice(0, 3).forEach((event, index) => { event.receivedAt = new Date(durationNow - (2 - index) * 60000).toISOString(); event.raw.speed = 31; });
   fs.writeFileSync(dataFile, JSON.stringify(durationData, null, 2));
