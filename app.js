@@ -131,9 +131,9 @@ function ensureGoogleMaps(apiKey) {
 }
 
 function googleMarkerIcon(point, heading) {
-  const colors = { man: '#2879d8', women: '#d34d8f', bike: '#e68a23', truck: '#6955c6', car: '#e53935' };
-  const svg = trackerMarkerSvg(point.trackerType).replace('<svg ', `<svg xmlns="http://www.w3.org/2000/svg" width="46" height="56" style="color:${colors[point.trackerType] || colors.car};transform:rotate(${heading}deg);transform-origin:center" `);
-  return { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`, scaledSize: new google.maps.Size(46, 56), anchor: new google.maps.Point(23, 28) };
+  const color = point.status === 'Moving' ? '#e53935' : '#5278e8';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="46" height="46" viewBox="0 0 46 46"><circle cx="23" cy="23" r="16" fill="${color}" stroke="white" stroke-width="4"/><circle cx="23" cy="23" r="5" fill="white" fill-opacity=".92"/></svg>`;
+  return { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`, scaledSize: new google.maps.Size(46, 46), anchor: new google.maps.Point(23, 23) };
 }
 
 async function refreshGoogleLiveMap(container) {
@@ -193,8 +193,7 @@ function refreshLiveMap() {
     const trailPoints = trailEvents.map(event => [Number(event.raw.lat), Number(event.raw.lng)]);
     if (trailPoints.length > 1) liveMarkerHeadings.set(point.id, bearingDegrees({ lat: trailPoints[trailPoints.length - 2][0], lng: trailPoints[trailPoints.length - 2][1] }, { lat: trailPoints[trailPoints.length - 1][0], lng: trailPoints[trailPoints.length - 1][1] }));
     const heading = liveMarkerHeadings.get(point.id) || 0;
-    const walking = point.trackerType === 'man' || point.trackerType === 'women';
-    const markerIcon = L.divIcon({ className: 'veyra-marker-wrap', html: `<span class="veyra-marker tracker-${point.trackerType} ${moving ? 'moving' : 'stopped'} ${walking && moving ? 'walking' : ''}" title="${point.name} · ${point.status}"><span class="veyra-marker-icon" style="--car-heading:${heading}deg">${trackerMarkerSvg(point.trackerType)}</span></span>`, iconSize: [46, 56], iconAnchor: [23, 28] });
+    const markerIcon = L.divIcon({ className: 'veyra-marker-wrap', html: `<span class="veyra-marker round-marker ${moving ? 'moving' : 'stopped'}" title="${point.name} · ${point.status}"><span class="round-marker-dot"></span></span>`, iconSize: [46, 46], iconAnchor: [23, 23] });
     const marker = liveMarkers.get(point.id);
     const nextPosition = [point.lat, point.lng];
     if (marker) {
