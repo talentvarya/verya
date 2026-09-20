@@ -149,7 +149,7 @@ async function refreshGoogleLiveMap(container) {
   googleTrailLayers.forEach(layer => layer.setMap(null)); googleTrailLayers = [];
   points.forEach(point => {
     const moving = point.status === 'Moving';
-    const trailEvents = (liveData?.events || []).filter(event => (event.deviceLinkId || event.vehicleId) === point.id && event.raw?.lat && event.raw?.lng).slice(0, 24).reverse();
+    const trailEvents = (liveData?.events || []).filter(event => (event.deviceLinkId === point.id || event.vehicleId === point.id) && event.raw?.lat && event.raw?.lng).slice(0, 24).reverse();
     const trailPoints = trailEvents.map(event => ({ lat: Number(event.raw.lat), lng: Number(event.raw.lng) }));
     if (trailPoints.length > 1) liveMarkerHeadings.set(point.id, bearingDegrees(trailPoints[trailPoints.length - 2], trailPoints[trailPoints.length - 1]));
     const heading = liveMarkerHeadings.get(point.id) || 0;
@@ -190,7 +190,7 @@ function refreshLiveMap() {
   liveTrailLayers = [];
   points.forEach(point => {
     const moving = point.status === 'Moving';
-    const trailEvents = (liveData?.events || []).filter(event => (event.deviceLinkId || event.vehicleId) === point.id && event.raw?.lat && event.raw?.lng).slice(0, 24).reverse();
+    const trailEvents = (liveData?.events || []).filter(event => (event.deviceLinkId === point.id || event.vehicleId === point.id) && event.raw?.lat && event.raw?.lng).slice(0, 24).reverse();
     const trailPoints = trailEvents.map(event => [Number(event.raw.lat), Number(event.raw.lng)]);
     if (trailPoints.length > 1) liveMarkerHeadings.set(point.id, bearingDegrees({ lat: trailPoints[trailPoints.length - 2][0], lng: trailPoints[trailPoints.length - 2][1] }, { lat: trailPoints[trailPoints.length - 1][0], lng: trailPoints[trailPoints.length - 1][1] }));
     const heading = liveMarkerHeadings.get(point.id) || 0;
