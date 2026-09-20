@@ -15,12 +15,18 @@ const viewMeta = {
 let state = { view: 'home', workspace: 'home', selectedVehicle: 0 };
 let liveData = null;
 let liveMap = null;
+let googleMap = null;
+let googleMapsLoading = null;
+let googleInfoWindow = null;
 let liveMapViewKey = '';
 const liveMarkers = new Map();
+const googleMarkers = new Map();
 const liveMarkerAnimations = new Map();
+const googleMarkerAnimations = new Map();
 const liveMarkerStates = new Map();
 const liveMarkerHeadings = new Map();
 let liveTrailLayers = [];
+let googleTrailLayers = [];
 const pageWrap = document.getElementById('pageWrap');
 const toast = document.getElementById('toast');
 let toastTimer;
@@ -104,19 +110,79 @@ function renderMapPanel() {
   return `<section class="panel map-panel map-panel-3d"><div class="panel-header"><div><div class="panel-title">3D live locations</div><div class="panel-subtitle">Real GPS positions · depth view refreshes every 5 seconds</div></div><div class="panel-actions"><span class="map-view-badge">◈ 3D LIVE</span><span class="badge live" id="mapDeviceCount">0 devices</span></div></div><div id="liveMap" class="live-map" aria-label="3D live vehicle map"><div class="map-depth-grid" aria-hidden="true"></div><div class="map-empty-state" id="mapEmptyState" hidden><span>⌖</span><strong>Waiting for phone GPS</strong><small>Pair a phone and send its first location</small></div></div><div class="map-footer"><span><i class="map-key moving"></i>Moving <i class="map-key stopped"></i>Stopped</span><span id="mapSync">Waiting for GPS data</span></div></section>`;
 }
 
-function refreshLiveMap() {
-  const container = document.getElementById('liveMap');
-  if (!container || typeof L === 'undefined') return;
-  if (!liveMap) {
-    liveMap = L.map(container, { zoomControl: true }).setView([28.5672, 77.2100], 12);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 20, maxNativeZoom: 19, subdomains: 'abcd', detectRetina: true, keepBuffer: 3, attribution: '&copy; OpenStreetMap contributors &copy; CARTO' }).addTo(liveMap);
-  }
+function liveMapPoints() {
   const points = [];
   vehicles.forEach(vehicle => {
     if (vehicle.position?.lat && vehicle.position?.lng) points.push({ id: vehicle.id, name: vehicle.name, lat: vehicle.position.lat, lng: vehicle.position.lng, status: vehicle.status || 'Stopped', speed: vehicle.speed || '0 km/h', icon: vehicle.icon, trackerType: vehicle.trackerType || 'car' });
   });
   (liveData?.deviceLinks || []).filter(link => !link.vehicleId && link.lastPosition?.lat && link.lastPosition?.lng).forEach(link => points.push({ id: link.id, name: link.phone || 'Registered phone', lat: link.lastPosition.lat, lng: link.lastPosition.lng, status: link.status || 'Stopped', speed: `${Number(link.speed || 0)} km/h`, icon: '♙', trackerType: link.trackerType || 'car' }));
   points.forEach(point => { point.trackerType = getTrackerType(point.id, point.trackerType || 'car'); });
+  return points;
+}
+
+function ensureGoogleMaps(apiKey) {
+  if (window.google?.maps) return Promise.resolve();
+  if (googleMapsLoading) return googleMapsLoading;
+  googleMapsLoading = new Promise((resolve, reject) => {
+    const script = document.createElement('script'); script.id = 'googleMapsScript'; script.async = true; script.defer = true; script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly`;
+    script.onload = resolve; script.onerror = () => reject(new Error('Google Maps could not load. Check the API key and Maps JavaScript API.')); document.head.appendChild(script);
+  }).catch(error => { googleMapsLoading = null; throw error; });
+  return googleMapsLoading;
+}
+
+function googleMarkerIcon(point, heading) {
+  const colors = { man: '#2879d8', women: '#d34d8f', bike: '#e68a23', truck: '#6955c6', car: '#e53935' };
+  const svg = trackerMarkerSvg(point.trackerType).replace('<svg ', `<svg xmlns="http://www.w3.org/2000/svg" width="46" height="56" style="color:${colors[point.trackerType] || colors.car};transform:rotate(${heading}deg);transform-origin:center" `);
+  return { url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`, scaledSize: new google.maps.Size(46, 56), anchor: new google.maps.Point(23, 28) };
+}
+
+async function refreshGoogleLiveMap(container) {
+  try { await ensureGoogleMaps(liveData.mapConfig.googleMapsApiKey); } catch (error) { showToast(error.message); return; }
+  if (!googleMap) {
+    googleMap = new google.maps.Map(container, { center: { lat: 28.5672, lng: 77.2100 }, zoom: 12, mapTypeControl: true, streetViewControl: false, fullscreenControl: true, clickableIcons: false, gestureHandling: 'greedy' });
+    googleInfoWindow = new google.maps.InfoWindow({ maxWidth: 260 });
+  }
+  const points = liveMapPoints();
+  const pointIds = new Set(points.map(point => point.id));
+  googleMarkers.forEach((marker, id) => { if (!pointIds.has(id)) { marker.setMap(null); googleMarkers.delete(id); const animation = googleMarkerAnimations.get(id); if (animation) cancelAnimationFrame(animation); googleMarkerAnimations.delete(id); } });
+  googleTrailLayers.forEach(layer => layer.setMap(null)); googleTrailLayers = [];
+  points.forEach(point => {
+    const moving = point.status === 'Moving';
+    const trailEvents = (liveData?.events || []).filter(event => (event.deviceLinkId || event.vehicleId) === point.id && event.raw?.lat && event.raw?.lng).slice(0, 24).reverse();
+    const trailPoints = trailEvents.map(event => ({ lat: Number(event.raw.lat), lng: Number(event.raw.lng) }));
+    if (trailPoints.length > 1) liveMarkerHeadings.set(point.id, bearingDegrees(trailPoints[trailPoints.length - 2], trailPoints[trailPoints.length - 1]));
+    const heading = liveMarkerHeadings.get(point.id) || 0;
+    let marker = googleMarkers.get(point.id);
+    if (!marker) {
+      marker = new google.maps.Marker({ map: googleMap, position: { lat: point.lat, lng: point.lng }, icon: googleMarkerIcon(point, heading), title: `${point.name} · ${point.status}`, optimized: false });
+      marker.addListener('click', () => { googleInfoWindow.setContent(markerTypePicker(point)); googleInfoWindow.open({ map: googleMap, anchor: marker }); });
+      googleMarkers.set(point.id, marker);
+    } else {
+      marker.setIcon(googleMarkerIcon(point, heading)); marker.setTitle(`${point.name} · ${point.status}`);
+      const previous = marker.getPosition()?.toJSON(); const next = { lat: point.lat, lng: point.lng }; const distance = previous ? Math.abs(previous.lat - next.lat) + Math.abs(previous.lng - next.lng) : 0;
+      const previousAnimation = googleMarkerAnimations.get(point.id); if (previousAnimation) cancelAnimationFrame(previousAnimation);
+      if (previous && distance > 0.0000005) { const startedAt = performance.now(); const duration = Math.min(4200, Math.max(900, distance * 130000000)); const step = now => { const progress = Math.min(1, (now - startedAt) / duration); const eased = progress < .5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2; marker.setPosition({ lat: previous.lat + (next.lat - previous.lat) * eased, lng: previous.lng + (next.lng - previous.lng) * eased }); if (progress < 1) googleMarkerAnimations.set(point.id, requestAnimationFrame(step)); else googleMarkerAnimations.delete(point.id); }; googleMarkerAnimations.set(point.id, requestAnimationFrame(step)); } else marker.setPosition(next);
+    }
+    if (trailPoints.length > 1) googleTrailLayers.push(new google.maps.Polyline({ path: trailPoints, geodesic: true, strokeColor: moving ? '#0b9c91' : '#5278e8', strokeOpacity: .88, strokeWeight: 4, icons: moving ? [] : [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 }, offset: '0', repeat: '14px' }], map: googleMap }));
+  });
+  const count = document.getElementById('mapDeviceCount'); if (count) count.textContent = `${points.length} live device${points.length === 1 ? '' : 's'}`;
+  const sync = document.getElementById('mapSync'); if (sync) sync.textContent = points.length ? `Updated ${new Date().toLocaleTimeString()}` : 'Waiting for GPS data';
+  const empty = document.getElementById('mapEmptyState'); if (empty) empty.hidden = Boolean(points.length);
+  if (!document.body.dataset.googleMarkerTypeBound) { document.body.addEventListener('click', event => { const option = event.target.closest('.gm-style-iw [data-marker-type]'); if (option) { event.preventDefault(); saveTrackerType(option.dataset.markerId, option.dataset.markerType); } }); document.body.dataset.googleMarkerTypeBound = 'true'; }
+  const viewKey = points.map(point => point.id).sort().join('|');
+  if (viewKey !== liveMapViewKey) { if (points.length === 1) googleMap.setCenter({ lat: points[0].lat, lng: points[0].lng }); else if (points.length > 1) { const bounds = new google.maps.LatLngBounds(); points.forEach(point => bounds.extend({ lat: point.lat, lng: point.lng })); googleMap.fitBounds(bounds, 35); } liveMapViewKey = viewKey; }
+}
+
+function refreshLiveMap() {
+  const container = document.getElementById('liveMap');
+  if (!container) return;
+  if (liveData?.mapConfig?.provider === 'google' && liveData.mapConfig.googleMapsApiKey) return refreshGoogleLiveMap(container);
+  if (typeof L === 'undefined') return;
+  if (!liveMap) {
+    liveMap = L.map(container, { zoomControl: true }).setView([28.5672, 77.2100], 12);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 20, maxNativeZoom: 19, subdomains: 'abcd', detectRetina: true, keepBuffer: 3, attribution: '&copy; OpenStreetMap contributors &copy; CARTO' }).addTo(liveMap);
+  }
+  const points = liveMapPoints();
   const pointIds = new Set(points.map(point => point.id));
   liveMarkers.forEach((marker, id) => { if (!pointIds.has(id)) { liveMap.removeLayer(marker); liveMarkers.delete(id); liveMarkerStates.delete(id); liveMarkerHeadings.delete(id); const animation = liveMarkerAnimations.get(id); if (animation) cancelAnimationFrame(animation); liveMarkerAnimations.delete(id); } });
   liveTrailLayers.forEach(layer => liveMap.removeLayer(layer));
@@ -223,7 +289,9 @@ function renderDevicePanel() {
 
 function renderView(view = state.view) {
   state.view = view;
-  if (liveMap) { liveMap.remove(); liveMap = null; liveMapViewKey = ''; liveMarkers.clear(); liveMarkerStates.clear(); liveMarkerHeadings.clear(); liveMarkerAnimations.forEach(animation => cancelAnimationFrame(animation)); liveMarkerAnimations.clear(); liveTrailLayers = []; }
+  if (liveMap) { liveMap.remove(); liveMap = null; }
+  if (googleMap) { googleMarkers.forEach(marker => marker.setMap(null)); googleMarkers.clear(); googleTrailLayers.forEach(layer => layer.setMap(null)); googleTrailLayers = []; googleMarkerAnimations.forEach(animation => cancelAnimationFrame(animation)); googleMarkerAnimations.clear(); googleMap = null; googleInfoWindow = null; }
+  liveMapViewKey = ''; liveMarkers.clear(); liveMarkerStates.clear(); liveMarkerHeadings.clear(); liveMarkerAnimations.forEach(animation => cancelAnimationFrame(animation)); liveMarkerAnimations.clear(); liveTrailLayers = [];
   const meta = viewMeta[view];
   document.getElementById('breadcrumbCurrent').textContent = meta.title.replace('Good morning, Arjun', 'Overview');
   document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));

@@ -31,6 +31,7 @@ const SMSLOCAL_SENDER_ID = process.env.SMSLOCAL_SENDER_ID || '';
 const SMSLOCAL_DLT_TEMPLATE_ID = process.env.SMSLOCAL_DLT_TEMPLATE_ID || '';
 const SMSLOCAL_API_URL = process.env.SMSLOCAL_API_URL || 'https://app.smslocal.in/api/smsapi';
 const SMSLOCAL_ENABLED = Boolean(SMSLOCAL_API_KEY && SMSLOCAL_SENDER_ID && SMSLOCAL_DLT_TEMPLATE_ID);
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
 const pendingPhoneOtps = new Map();
 const requestWindows = new Map();
 const cameraFrames = new Map();
@@ -209,7 +210,7 @@ async function handler(req, res) {
     if (pathname.startsWith('/api/') && !publicApi) { const user = await requireAuth(req, res); if (!user) return; }
 
     if (pathname === '/api/health' && req.method === 'GET') return send(res, 200, { ok: true, service: 'veyra-local-mvp', persistence: SUPABASE_ENABLED ? 'supabase' : 'local-json', time: new Date().toISOString() });
-    if (pathname === '/api/bootstrap' && req.method === 'GET') { const data = await readData(); data.session.user = req.authUser.email; data.session.email = req.authUser.email; return send(res, 200, { ...data, permissions: permissions(data.session.role) }); }
+    if (pathname === '/api/bootstrap' && req.method === 'GET') { const data = await readData(); data.session.user = req.authUser.email; data.session.email = req.authUser.email; return send(res, 200, { ...data, mapConfig: { provider: GOOGLE_MAPS_API_KEY ? 'google' : 'leaflet', googleMapsApiKey: GOOGLE_MAPS_API_KEY }, permissions: permissions(data.session.role) }); }
     if (pathname === '/api/session' && req.method === 'GET') { const data = await readData(); data.session.user = req.authUser.email; data.session.email = req.authUser.email; return send(res, 200, { ...data.session, permissions: permissions(data.session.role) }); }
     if (pathname === '/api/session' && req.method === 'PATCH') {
       const input = await body(req); const role = String(input.role || '').toLowerCase();
