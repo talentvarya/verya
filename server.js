@@ -270,7 +270,8 @@ async function handler(req, res) {
       const data = current;
       const id = String(input.registration).trim().toUpperCase().replace(/\s+/g, '');
       if (data.vehicles.some(vehicle => vehicle.id === id)) return send(res, 409, { error: 'A vehicle with that registration already exists.' });
-      const vehicle = { id, name: String(input.name).trim(), icon: input.type === 'EV' ? '⚡' : '🚙', trackerType: 'car', status: 'Parked', statusClass: 'status-parked', location: 'Awaiting first location · just now', speed: '—', km: '0.0 km', last: 'Just added', source: 'Setup required', capabilities: ['Vehicle profile'] };
+      const powertrain = ['ICE', 'CNG', 'EV'].includes(input.type) ? input.type : 'ICE';
+      const vehicle = { id, name: String(input.name).trim(), powertrain, icon: powertrain === 'EV' ? '⚡' : powertrain === 'CNG' ? '⛽' : '🚙', trackerType: 'car', status: 'Parked', statusClass: 'status-parked', location: 'Awaiting first location · just now', speed: '—', km: '0.0 km', last: 'Just added', source: 'Setup required', capabilities: ['Vehicle profile'] };
       data.vehicles.push(vehicle); audit(data, `Added ${vehicle.name} (${vehicle.id}) to the workspace.`); await writeData(data); return send(res, 201, vehicle);
     }
 

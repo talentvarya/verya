@@ -328,7 +328,7 @@ function openInviteModal() {
 }
 
 function openAddVehicleModal() {
-  openModal('Connect a vehicle', `<p>Add a vehicle profile now. A real tracker or mobile location source can be paired later.</p><form id="vehicleForm" class="modal-form"><label>Vehicle name<input name="name" required placeholder="e.g. Honda City" /></label><label>Registration number<input name="registration" required placeholder="e.g. DL04GH1234" /></label><label>Powertrain<select name="type"><option value="ICE">Petrol / diesel</option><option value="EV">Electric vehicle</option></select></label><div class="modal-actions"><button type="button" class="btn" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Add vehicle</button></div></form>`);
+  openModal('Connect a vehicle', `<p>Add a vehicle profile now. A real tracker or mobile location source can be paired later.</p><form id="vehicleForm" class="modal-form"><label>Vehicle name<input name="name" required placeholder="e.g. Honda City" /></label><label>Registration number<input name="registration" required placeholder="e.g. DL04GH1234" /></label><label>Powertrain<select name="type"><option value="ICE">Petrol / diesel</option><option value="CNG">CNG</option><option value="EV">Electric vehicle</option></select></label><div class="modal-actions"><button type="button" class="btn" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Add vehicle</button></div></form>`);
   document.getElementById('vehicleForm').addEventListener('submit', async event => {
     event.preventDefault();
     const payload = Object.fromEntries(new FormData(event.currentTarget));
