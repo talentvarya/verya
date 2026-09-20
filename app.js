@@ -57,6 +57,7 @@ function footprintEvents(pointId) {
   const clean = [];
   events.forEach(event => {
     if (event.raw?.acceptedDistanceMeters === null) return;
+    if (event.raw?.acceptedDistanceMeters === 0 && clean.length > 0) return;
     const previous = clean[clean.length - 1];
     if (previous) {
       const previousRaw = previous.raw || {}; const currentRaw = event.raw || {};
@@ -65,6 +66,7 @@ function footprintEvents(pointId) {
       const gapSeconds = Math.max(1, Math.min(120, (new Date(event.receivedAt || 0).getTime() - new Date(previous.receivedAt || 0).getTime()) / 1000 || 10));
       const speed = Math.max(Number(previousRaw.speed || 0), Number(currentRaw.speed || 0));
       const plausibleSpeedKph = speed > 3 ? Math.max(speed * 1.8, 90) : 120;
+      if (step <= Math.max(accuracy * 1.5, 15)) return;
       if (step > Math.max(accuracy * 1.5, 15) && step > Math.max(150, plausibleSpeedKph / 3.6 * gapSeconds)) return;
     }
     clean.push(event);
