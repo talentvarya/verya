@@ -240,9 +240,15 @@ async function handler(req, res) {
       let userId = `demo-${Buffer.from(phone).toString('base64url').slice(-10)}`;
       if (pending.mode === 'supabase') { try { const auth = await supabaseAuthRequest('verify', { phone, token: String(input.code || ''), type: 'sms' }); userId = auth.user?.id || userId; } catch (error) { return send(res, 401, { error: error.message }); } }
       else if (String(input.code || '') !== pending.code) return send(res, 401, { error: 'Incorrect demo OTP.' });
-      const data = await readData(); const vehicle = pending.vehicleId ? data.vehicles.find(item => item.id === pending.vehicleId) : null; const deviceToken = createDeviceToken(); const deviceLink = { id: `DL-${Date.now()}`, phone: maskPhone(phone), vehicleId: vehicle?.id || null, userId, mode: pending.mode, pairedAt: new Date().toISOString(), status: 'Stopped', speed: 0, lastSeen: null, lastPosition: null, deviceTokenHash: hashDeviceToken(deviceToken) }; data.deviceLinks.push(deviceLink); data.deviceLinks = data.deviceLinks.slice(-20); audit(data, `Paired ${maskPhone(phone)} as a mobile device${vehicle ? ` for ${vehicle.name}` : ''}.`); await writeData(data); pendingPhoneOtps.delete(phone); return send(res, 200, { paired: true, deviceLinkId: deviceLink.id, deviceToken, vehicleId: vehicle?.id || null, vehicleName: vehicle?.name || null, phone: deviceLink.phone, mode: pending.mode, userId });
+      const data = await readData(); const vehicle = pending.vehicleId ? data.vehicles.find(item => item.id === pending.vehicleId) : null; const deviceToken = createDeviceToken(); const deviceLink = { id: `DL-${Date.now()}`, phone: maskPhone(phone), vehicleId: vehicle?.id || null, userId, mode: pending.mode, pairedAt: new Date().toISOString(), status: 'Stopped', speed: 0, lastSeen: null, lastPosition: null, trackerType: 'car', deviceTokenHash: hashDeviceToken(deviceToken) }; data.deviceLinks.push(deviceLink); data.deviceLinks = data.deviceLinks.slice(-20); audit(data, `Paired ${maskPhone(phone)} as a mobile device${vehicle ? ` for ${vehicle.name}` : ''}.`); await writeData(data); pendingPhoneOtps.delete(phone); return send(res, 200, { paired: true, deviceLinkId: deviceLink.id, deviceToken, vehicleId: vehicle?.id || null, vehicleName: vehicle?.name || null, phone: deviceLink.phone, mode: pending.mode, userId });
     }
     const deviceMatch = pathname.match(/^\/api\/devices\/([^/]+)$/);
+    if (deviceMatch && req.method === 'PATCH') {
+      const data = await readData(); if (!can(data, 'manageVehicles')) return deny(res, 'update devices');
+      const link = data.deviceLinks.find(item => item.id === decodeURIComponent(deviceMatch[1])); if (!link) return send(res, 404, { error: 'Device not found.' });
+      const input = await body(req); if (!['man', 'women', 'car', 'bike', 'truck'].includes(input.trackerType)) return send(res, 400, { error: 'Unsupported marker type.' });
+      link.trackerType = input.trackerType; audit(data, `Changed ${link.phone} marker to ${input.trackerType}.`); await writeData(data); return send(res, 200, link);
+    }
     if (deviceMatch && req.method === 'DELETE') {
       const data = await readData(); if (!can(data, 'manageVehicles')) return deny(res, 'delete devices');
       const index = data.deviceLinks.findIndex(item => item.id === decodeURIComponent(deviceMatch[1]));
@@ -264,8 +270,16 @@ async function handler(req, res) {
       const data = current;
       const id = String(input.registration).trim().toUpperCase().replace(/\s+/g, '');
       if (data.vehicles.some(vehicle => vehicle.id === id)) return send(res, 409, { error: 'A vehicle with that registration already exists.' });
-      const vehicle = { id, name: String(input.name).trim(), icon: input.type === 'EV' ? '⚡' : '🚙', status: 'Parked', statusClass: 'status-parked', location: 'Awaiting first location · just now', speed: '—', km: '0.0 km', last: 'Just added', source: 'Setup required', capabilities: ['Vehicle profile'] };
+      const vehicle = { id, name: String(input.name).trim(), icon: input.type === 'EV' ? '⚡' : '🚙', trackerType: 'car', status: 'Parked', statusClass: 'status-parked', location: 'Awaiting first location · just now', speed: '—', km: '0.0 km', last: 'Just added', source: 'Setup required', capabilities: ['Vehicle profile'] };
       data.vehicles.push(vehicle); audit(data, `Added ${vehicle.name} (${vehicle.id}) to the workspace.`); await writeData(data); return send(res, 201, vehicle);
+    }
+
+    const vehicleMatch = pathname.match(/^\/api\/vehicles\/([^/]+)$/);
+    if (vehicleMatch && req.method === 'PATCH') {
+      const data = await readData(); if (!can(data, 'manageVehicles')) return deny(res, 'update vehicles');
+      const vehicle = data.vehicles.find(item => item.id === decodeURIComponent(vehicleMatch[1])); if (!vehicle) return send(res, 404, { error: 'Vehicle not found.' });
+      const input = await body(req); if (!['man', 'women', 'car', 'bike', 'truck'].includes(input.trackerType)) return send(res, 400, { error: 'Unsupported marker type.' });
+      vehicle.trackerType = input.trackerType; audit(data, `Changed ${vehicle.name} marker to ${input.trackerType}.`); await writeData(data); return send(res, 200, vehicle);
     }
 
     const alertMatch = pathname.match(/^\/api\/alerts\/([^/]+)\/ack$/);

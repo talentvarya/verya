@@ -30,6 +30,20 @@ function statCard(label, value, meta, glyph, color = '') { return `<article clas
 function pageHeading(meta, actions = '') { return `<div class="page-heading"><div><div class="eyebrow">${meta.eyebrow}</div><h1>${meta.title}</h1><p>${meta.subtitle}</p></div><div class="heading-actions">${actions}</div></div>`; }
 function refreshSummaryCards() { const summary = liveData?.summary || {}; const values = { 'Total distance': summary.distance || '0.00 km', 'Driving time': summary.driving || '0 h 00 m', 'Idle time': summary.idle || '0 m', 'Active alerts': String(summary.alerts || 0), 'Distance travelled': summary.distance || '0.00 km', 'Running time': summary.driving || '0 h 00 m' }; document.querySelectorAll('[data-stat]').forEach(card => { if (values[card.dataset.stat] !== undefined) card.textContent = values[card.dataset.stat]; }); }
 function carMarkerSvg() { return '<svg class="car-marker-svg" viewBox="0 0 48 64" aria-hidden="true"><path d="M14 7c1-3 4-5 7-5h6c3 0 6 2 7 5l5 13v32c0 4-3 7-7 7H16c-4 0-7-3-7-7V20l5-13Z" fill="currentColor" stroke="white" stroke-width="2" stroke-linejoin="round"/><path d="M13 20c2-5 5-8 11-8s9 3 11 8l-2 6H15l-2-6Z" fill="rgba(255,255,255,.48)"/><path d="M15 35h18" stroke="rgba(255,255,255,.8)" stroke-width="2" stroke-linecap="round"/><rect x="5" y="25" width="5" height="13" rx="2" fill="#293b45" stroke="white" stroke-width="1"/><rect x="38" y="25" width="5" height="13" rx="2" fill="#293b45" stroke="white" stroke-width="1"/><circle cx="14" cy="8" r="2" fill="#fff3a6"/><circle cx="34" cy="8" r="2" fill="#fff3a6"/><path d="M14 55h20" stroke="#ff8b8b" stroke-width="2" stroke-linecap="round"/></svg>'; }
+function trackerTypeStorageKey(id) { return `veyra-tracker-type:${id}`; }
+function getTrackerType(id, fallback = 'car') { try { const saved = localStorage.getItem(trackerTypeStorageKey(id)); return ['man', 'women', 'car', 'bike', 'truck'].includes(saved) ? saved : fallback; } catch (_) { return fallback; } }
+function setTrackerType(id, type) { try { localStorage.setItem(trackerTypeStorageKey(id), type); } catch (_) {} }
+function trackerTypeLabel(type) { return ({ man: 'Man', women: 'Women', car: 'Car', bike: 'Bike', truck: 'Truck' })[type] || 'Car'; }
+function trackerMarkerSvg(type) {
+  if (type === 'man' || type === 'women') return '<svg class="person-marker-svg" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="8" r="5" fill="currentColor" stroke="white" stroke-width="2"/><path d="M24 15v14M16 22l8 5 8-5M24 29l-7 13M24 29l9 13" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  if (type === 'bike') return '<svg class="bike-marker-svg" viewBox="0 0 48 32" aria-hidden="true"><circle cx="10" cy="23" r="6" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="38" cy="23" r="6" fill="none" stroke="currentColor" stroke-width="3"/><path d="M10 23l9-13 7 13h12M19 10h8M18 14h9" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  if (type === 'truck') return '<svg class="truck-marker-svg" viewBox="0 0 54 32" aria-hidden="true"><path d="M5 5h30v22H5zM35 13h8l6 6v8H35z" fill="currentColor" stroke="white" stroke-width="2" stroke-linejoin="round"/><path d="M38 15h5l4 5h-9z" fill="rgba(255,255,255,.55)"/><circle cx="15" cy="28" r="4" fill="#293b45" stroke="white" stroke-width="2"/><circle cx="43" cy="28" r="4" fill="#293b45" stroke="white" stroke-width="2"/></svg>';
+  return carMarkerSvg();
+}
+function markerTypePicker(point) {
+  const options = ['man', 'women', 'car', 'bike', 'truck'];
+  return `<div class="marker-popup"><strong>${point.name}</strong><small>${point.status} · ${point.speed}</small><span class="marker-popup-label">Marker type</span><div class="marker-type-picker">${options.map(type => `<button type="button" class="marker-type-option ${point.trackerType === type ? 'selected' : ''}" data-marker-type="${type}" data-marker-id="${point.id}"><span class="marker-type-symbol tracker-${type}">${trackerMarkerSvg(type)}</span>${trackerTypeLabel(type)}</button>`).join('')}</div></div>`;
+}
 function bearingDegrees(from, to) { const rad = Math.PI / 180; const y = Math.sin((to.lng - from.lng) * rad) * Math.cos(to.lat * rad); const x = Math.cos(from.lat * rad) * Math.sin(to.lat * rad) - Math.sin(from.lat * rad) * Math.cos(to.lat * rad) * Math.cos((to.lng - from.lng) * rad); return Math.atan2(y, x) * 180 / Math.PI; }
 
 async function loadBootstrap({ render = true } = {}) {
@@ -99,9 +113,10 @@ function refreshLiveMap() {
   }
   const points = [];
   vehicles.forEach(vehicle => {
-    if (vehicle.position?.lat && vehicle.position?.lng) points.push({ id: vehicle.id, name: vehicle.name, lat: vehicle.position.lat, lng: vehicle.position.lng, status: vehicle.status || 'Stopped', speed: vehicle.speed || '0 km/h', icon: vehicle.icon });
+    if (vehicle.position?.lat && vehicle.position?.lng) points.push({ id: vehicle.id, name: vehicle.name, lat: vehicle.position.lat, lng: vehicle.position.lng, status: vehicle.status || 'Stopped', speed: vehicle.speed || '0 km/h', icon: vehicle.icon, trackerType: vehicle.trackerType || 'car' });
   });
-  (liveData?.deviceLinks || []).filter(link => !link.vehicleId && link.lastPosition?.lat && link.lastPosition?.lng).forEach(link => points.push({ id: link.id, name: link.phone || 'Registered phone', lat: link.lastPosition.lat, lng: link.lastPosition.lng, status: link.status || 'Stopped', speed: `${Number(link.speed || 0)} km/h`, icon: '♙' }));
+  (liveData?.deviceLinks || []).filter(link => !link.vehicleId && link.lastPosition?.lat && link.lastPosition?.lng).forEach(link => points.push({ id: link.id, name: link.phone || 'Registered phone', lat: link.lastPosition.lat, lng: link.lastPosition.lng, status: link.status || 'Stopped', speed: `${Number(link.speed || 0)} km/h`, icon: '♙', trackerType: link.trackerType || 'car' }));
+  points.forEach(point => { point.trackerType = getTrackerType(point.id, point.trackerType || 'car'); });
   const pointIds = new Set(points.map(point => point.id));
   liveMarkers.forEach((marker, id) => { if (!pointIds.has(id)) { liveMap.removeLayer(marker); liveMarkers.delete(id); liveMarkerStates.delete(id); liveMarkerHeadings.delete(id); const animation = liveMarkerAnimations.get(id); if (animation) cancelAnimationFrame(animation); liveMarkerAnimations.delete(id); } });
   liveTrailLayers.forEach(layer => liveMap.removeLayer(layer));
@@ -112,12 +127,13 @@ function refreshLiveMap() {
     const trailPoints = trailEvents.map(event => [Number(event.raw.lat), Number(event.raw.lng)]);
     if (trailPoints.length > 1) liveMarkerHeadings.set(point.id, bearingDegrees({ lat: trailPoints[trailPoints.length - 2][0], lng: trailPoints[trailPoints.length - 2][1] }, { lat: trailPoints[trailPoints.length - 1][0], lng: trailPoints[trailPoints.length - 1][1] }));
     const heading = liveMarkerHeadings.get(point.id) || 0;
-    const markerIcon = L.divIcon({ className: 'veyra-marker-wrap', html: `<span class="veyra-marker ${moving ? 'moving' : 'stopped'}" title="${point.name} · ${point.status}"><span class="veyra-marker-icon" style="--car-heading:${heading}deg">${carMarkerSvg()}</span></span>`, iconSize: [46, 56], iconAnchor: [23, 28] });
+    const walking = point.trackerType === 'man' || point.trackerType === 'women';
+    const markerIcon = L.divIcon({ className: 'veyra-marker-wrap', html: `<span class="veyra-marker tracker-${point.trackerType} ${moving ? 'moving' : 'stopped'} ${walking && moving ? 'walking' : ''}" title="${point.name} · ${point.status}"><span class="veyra-marker-icon" style="--car-heading:${heading}deg">${trackerMarkerSvg(point.trackerType)}</span></span>`, iconSize: [46, 56], iconAnchor: [23, 28] });
     const marker = liveMarkers.get(point.id);
     const nextPosition = [point.lat, point.lng];
     if (marker) {
       marker.setIcon(markerIcon);
-      marker.setPopupContent(`<strong>${point.name}</strong><br>${point.status} · ${point.speed}`);
+      marker.setPopupContent(markerTypePicker(point));
       const previous = marker.getLatLng();
       const previousPosition = [Number(previous.lat), Number(previous.lng)];
       const distance = Math.abs(previousPosition[0] - nextPosition[0]) + Math.abs(previousPosition[1] - nextPosition[1]);
@@ -136,7 +152,7 @@ function refreshLiveMap() {
         liveMarkerAnimations.set(point.id, requestAnimationFrame(step));
       } else marker.setLatLng(nextPosition);
       liveMarkerStates.set(point.id, { lat: point.lat, lng: point.lng });
-    } else { const created = L.marker(nextPosition, { icon: markerIcon }).addTo(liveMap); created.bindPopup(`<strong>${point.name}</strong><br>${point.status} · ${point.speed}`); liveMarkers.set(point.id, created); liveMarkerStates.set(point.id, { lat: point.lat, lng: point.lng }); }
+    } else { const created = L.marker(nextPosition, { icon: markerIcon }).addTo(liveMap); created.bindPopup(markerTypePicker(point), { maxWidth: 250 }); liveMarkers.set(point.id, created); liveMarkerStates.set(point.id, { lat: point.lat, lng: point.lng }); }
     if (trailPoints.length > 1) {
       liveTrailLayers.push(L.polyline(trailPoints, { color: '#ffffff', weight: 9, opacity: .58, lineCap: 'round', lineJoin: 'round' }).addTo(liveMap));
       liveTrailLayers.push(L.polyline(trailPoints, { color: moving ? '#0b9c91' : '#5278e8', weight: 4, opacity: .9, lineCap: 'round', lineJoin: 'round', dashArray: moving ? null : '7 8' }).addTo(liveMap));
@@ -145,6 +161,10 @@ function refreshLiveMap() {
   const count = document.getElementById('mapDeviceCount'); if (count) count.textContent = `${points.length} live device${points.length === 1 ? '' : 's'}`;
   const sync = document.getElementById('mapSync'); if (sync) sync.textContent = points.length ? `Updated ${new Date().toLocaleTimeString()}` : 'Waiting for GPS data';
   const empty = document.getElementById('mapEmptyState'); if (empty) empty.hidden = Boolean(points.length);
+  if (!container.dataset.markerTypeBound) {
+    container.addEventListener('click', event => { const option = event.target.closest('[data-marker-type]'); if (!option) return; event.preventDefault(); event.stopPropagation(); saveTrackerType(option.dataset.markerId, option.dataset.markerType); });
+    container.dataset.markerTypeBound = 'true';
+  }
   const viewKey = points.map(point => point.id).sort().join('|');
   if (viewKey !== liveMapViewKey) {
     if (points.length === 1) liveMap.setView([points[0].lat, points[0].lng], 13);
@@ -152,6 +172,22 @@ function refreshLiveMap() {
     liveMapViewKey = viewKey;
   }
   setTimeout(() => liveMap?.invalidateSize({ pan: false }), 100);
+}
+
+async function saveTrackerType(id, type) {
+  setTrackerType(id, type);
+  const isDevice = (liveData?.deviceLinks || []).some(link => link.id === id);
+  const path = isDevice ? `/api/devices/${encodeURIComponent(id)}` : `/api/vehicles/${encodeURIComponent(id)}`;
+  try {
+    const response = await fetch(path, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trackerType: type }) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not save marker type');
+    if (isDevice) { const link = liveData.deviceLinks.find(item => item.id === id); if (link) link.trackerType = type; }
+    else { const vehicle = vehicles.find(item => item.id === id); if (vehicle) vehicle.trackerType = type; }
+    showToast(`${trackerTypeLabel(type)} marker selected`);
+    refreshLiveMap();
+    const marker = liveMarkers.get(id); if (marker) marker.openPopup();
+  } catch (error) { showToast(error.message); }
 }
 
 function renderVehiclePanel() {
