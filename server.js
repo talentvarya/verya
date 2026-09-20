@@ -264,7 +264,7 @@ async function handler(req, res) {
       let userId = `demo-${Buffer.from(phone).toString('base64url').slice(-10)}`;
       if (pending.mode === 'supabase') { try { const auth = await supabaseAuthRequest('verify', { phone, token: String(input.code || ''), type: 'sms' }); userId = auth.user?.id || userId; } catch (error) { return send(res, 401, { error: error.message }); } }
       else if (String(input.code || '') !== pending.code) return send(res, 401, { error: 'Incorrect demo OTP.' });
-      const data = await readData(); const vehicle = pending.vehicleId ? data.vehicles.find(item => item.id === pending.vehicleId) : null; const deviceToken = createDeviceToken(); const deviceLink = { id: `DL-${Date.now()}`, phone: maskPhone(phone), vehicleId: vehicle?.id || null, userId, mode: pending.mode, pairedAt: new Date().toISOString(), status: 'Stopped', speed: 0, lastSeen: null, lastPosition: null, trackerType: 'car', micEnabled: false, deviceTokenHash: hashDeviceToken(deviceToken) }; data.deviceLinks.push(deviceLink); data.deviceLinks = data.deviceLinks.slice(-20); audit(data, `Paired ${maskPhone(phone)} as a mobile device${vehicle ? ` for ${vehicle.name}` : ''}.`); await writeData(data); pendingPhoneOtps.delete(phone); return send(res, 200, { paired: true, deviceLinkId: deviceLink.id, deviceToken, vehicleId: vehicle?.id || null, vehicleName: vehicle?.name || null, phone: deviceLink.phone, mode: pending.mode, userId });
+      const data = await readData(); const vehicle = pending.vehicleId ? data.vehicles.find(item => item.id === pending.vehicleId) : null; const deviceToken = createDeviceToken(); const deviceLink = { id: `DL-${Date.now()}`, phone, vehicleId: vehicle?.id || null, userId, mode: pending.mode, pairedAt: new Date().toISOString(), status: 'Stopped', speed: 0, lastSeen: null, lastPosition: null, trackerType: 'car', cameraEnabled: false, cameraFacing: 'back', micEnabled: false, deviceTokenHash: hashDeviceToken(deviceToken) }; data.deviceLinks.push(deviceLink); data.deviceLinks = data.deviceLinks.slice(-20); audit(data, `Paired ${maskPhone(phone)} as a mobile device${vehicle ? ` for ${vehicle.name}` : ''}.`); await writeData(data); pendingPhoneOtps.delete(phone); return send(res, 200, { paired: true, deviceLinkId: deviceLink.id, deviceToken, vehicleId: vehicle?.id || null, vehicleName: vehicle?.name || null, phone: deviceLink.phone, mode: pending.mode, userId });
     }
     const deviceMatch = pathname.match(/^\/api\/devices\/([^/]+)$/);
     if (deviceMatch && req.method === 'PATCH') {
@@ -273,18 +273,20 @@ async function handler(req, res) {
       const input = await body(req);
       if (input.trackerType !== undefined) { if (!['man', 'women', 'car', 'bike', 'truck'].includes(input.trackerType)) return send(res, 400, { error: 'Unsupported marker type.' }); link.trackerType = input.trackerType; audit(data, `Changed ${link.phone} marker to ${input.trackerType}.`); }
       if (input.micEnabled !== undefined) { link.micEnabled = Boolean(input.micEnabled); audit(data, `${link.micEnabled ? 'Enabled' : 'Disabled'} microphone for ${link.phone}.`); if (!link.micEnabled) microphoneFrames.delete(link.id); }
+      if (input.cameraFacing !== undefined) { if (!['front', 'back'].includes(input.cameraFacing)) return send(res, 400, { error: 'Camera must be front or back.' }); link.cameraFacing = input.cameraFacing; audit(data, `Selected ${input.cameraFacing} camera for ${link.phone}.`); }
+      if (input.cameraEnabled !== undefined) { link.cameraEnabled = Boolean(input.cameraEnabled); audit(data, `${link.cameraEnabled ? 'Enabled' : 'Disabled'} camera for ${link.phone}.`); if (!link.cameraEnabled) cameraFrames.delete(link.id); }
       await writeData(data); return send(res, 200, link);
     }
     if (deviceMatch && req.method === 'DELETE') {
       const data = await readData(); if (!can(data, 'manageVehicles')) return deny(res, 'delete devices');
       const index = data.deviceLinks.findIndex(item => item.id === decodeURIComponent(deviceMatch[1]));
       if (index < 0) return send(res, 404, { error: 'Device not found.' });
-      const [removed] = data.deviceLinks.splice(index, 1); microphoneFrames.delete(removed.id); audit(data, `Removed mobile device ${removed.phone}.`); await writeData(data); return send(res, 200, { deleted: true, deviceLinkId: removed.id });
+      const [removed] = data.deviceLinks.splice(index, 1); microphoneFrames.delete(removed.id); cameraFrames.delete(removed.id); audit(data, `Removed mobile device ${removed.phone}.`); await writeData(data); return send(res, 200, { deleted: true, deviceLinkId: removed.id });
     }
     if (pathname === '/api/device/config' && req.method === 'GET') {
       const query = new URL(req.url, `http://${req.headers.host || 'localhost'}`).searchParams; const data = await readData(); const link = data.deviceLinks.find(item => item.id === query.get('deviceLinkId'));
       if (!link || !deviceTokenMatches(req, {}, link)) return send(res, 401, { error: 'This device is not authorized.' });
-      return send(res, 200, { micEnabled: Boolean(link.micEnabled), cameraEnabled: Boolean(cameraFrames.has(link.id)) });
+      return send(res, 200, { micEnabled: Boolean(link.micEnabled), cameraEnabled: Boolean(link.cameraEnabled), cameraFacing: link.cameraFacing || 'back' });
     }
     if (pathname === '/api/ingest/mic' && req.method === 'POST') {
       const input = await body(req); const data = await readData(); const link = input.deviceLinkId ? data.deviceLinks.find(item => item.id === input.deviceLinkId) : null;
@@ -351,6 +353,7 @@ async function handler(req, res) {
       const input = await body(req); const data = await readData(); const link = input.deviceLinkId ? data.deviceLinks.find(item => item.id === input.deviceLinkId) : null;
       if (!link) return send(res, 404, { error: 'Paired device not found.' });
       if (!deviceTokenMatches(req, input, link)) return send(res, 401, { error: 'This device is not authorized. Pair it again.' });
+      if (!link.cameraEnabled) return send(res, 403, { error: 'Camera is disabled by the admin.' });
       const image = String(input.image || ''); if (!/^[A-Za-z0-9+/=]+$/.test(image) || image.length > 350000) return send(res, 400, { error: 'Camera frame is invalid or too large.' });
       cameraFrames.set(link.id, { image, contentType: 'image/jpeg', receivedAt: new Date().toISOString() }); return send(res, 200, { ok: true, receivedAt: cameraFrames.get(link.id).receivedAt });
     }

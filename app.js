@@ -103,7 +103,7 @@ function renderHome() {
 
 function renderCameraPanel() {
   const links = liveData?.deviceLinks || [];
-  const cards = links.length ? links.map(link => `<article class="camera-card"><div class="camera-preview"><img class="camera-feed" data-camera-feed="${link.id}" alt="Live vehicle camera" hidden><div class="camera-placeholder" data-camera-placeholder><div class="camera-preview-icon">▣</div><strong>Camera not connected</strong><small>Enable camera on ${link.phone || 'this device'}</small></div><span class="camera-watermark">VEYRA · ADMIN VIEW</span></div><div class="camera-card-footer"><div><strong>${link.phone || 'Registered device'}</strong><small data-camera-state>One-way camera · permission required</small><audio class="mic-audio" data-mic-audio="${link.id}" controls ${link.micEnabled ? '' : 'hidden'}></audio></div><div class="camera-actions"><button class="btn btn-sm btn-primary" data-camera-connect="${link.id}">Camera</button><button class="btn btn-sm ${link.micEnabled ? 'btn-danger' : ''}" data-mic-toggle="${link.id}">${link.micEnabled ? 'Mic off' : 'Mic on'}</button></div></div></article>`).join('') : '<div class="camera-empty"><span class="camera-preview-icon">▣</span><strong>No camera devices connected</strong><small>Pair a phone first, then connect its vehicle camera.</small></div>';
+  const cards = links.length ? links.map(link => { const cameraOn = Boolean(link.cameraEnabled); return `<article class="camera-card"><div class="camera-preview"><img class="camera-feed" data-camera-feed="${link.id}" alt="Live vehicle camera" hidden><div class="camera-placeholder" data-camera-placeholder><div class="camera-preview-icon">▣</div><strong>${cameraOn ? 'Waiting for camera' : 'Camera off'}</strong><small>${cameraOn ? 'Grant camera permission on the phone' : 'Turn on from this dashboard'}</small></div><span class="camera-watermark">VEYRA · ADMIN VIEW</span></div><div class="camera-card-footer"><div><button class="device-number" data-device-open="${link.id}">${link.phone || 'Registered device'}</button><small data-camera-state>${cameraOn ? `Camera ${link.cameraFacing || 'back'} · permission required` : 'Camera off by default'}</small><audio class="mic-audio" data-mic-audio="${link.id}" controls ${link.micEnabled ? '' : 'hidden'}></audio></div><div class="camera-actions"><button class="btn btn-sm ${cameraOn ? 'btn-danger' : 'btn-primary'}" data-camera-toggle="${link.id}">${cameraOn ? 'Camera off' : 'Camera on'}</button><select class="camera-facing" data-camera-facing="${link.id}" aria-label="Camera side"><option value="back" ${(link.cameraFacing || 'back') === 'back' ? 'selected' : ''}>Back camera</option><option value="front" ${link.cameraFacing === 'front' ? 'selected' : ''}>Front camera</option></select><button class="btn btn-sm ${link.micEnabled ? 'btn-danger' : ''}" data-mic-toggle="${link.id}">${link.micEnabled ? 'Mic off' : 'Mic on'}</button></div></div></article>`; }).join('') : '<div class="camera-empty"><span class="camera-preview-icon">▣</span><strong>No camera devices connected</strong><small>Pair a phone first, then connect its vehicle camera.</small></div>';
   return `<section class="panel camera-panel"><div class="panel-header"><div><div class="panel-title">Vehicle camera & microphone</div><div class="panel-subtitle">One-way admin controls · phone permission and visible notification required</div></div><span class="badge parked">Admin view only</span></div><div class="camera-grid">${cards}</div><div class="camera-notice">⌁ Camera and microphone are visible on the device. The device owner must grant permission; the dashboard only receives the authorized one-way feed.</div></section>`;
 }
 
@@ -282,7 +282,7 @@ function renderDevicePanel() {
     const badge = status === 'Moving' ? 'live' : status === 'Offline' ? 'warning' : 'parked';
     const lastSeen = link.lastSeen ? new Date(link.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Not started';
     const position = link.lastPosition?.lat && link.lastPosition?.lng ? `<a class="text-button" href="https://www.google.com/maps/search/?api=1&query=${link.lastPosition.lat},${link.lastPosition.lng}" target="_blank" rel="noreferrer">Open location ↗</a>` : '';
-    return `<div class="activity-item"><span class="vehicle-photo" style="width:34px;height:34px;font-size:17px">♙</span><div><strong>${link.phone || 'Registered phone'}</strong><small>${link.vehicleId ? vehicleNames[link.vehicleId] || link.vehicleId : 'Phone only'} · Last seen ${lastSeen}${position ? ` · ${position}` : ''} · Mic ${link.micEnabled ? 'on' : 'off'}</small></div><span class="badge ${badge}">● ${status}</span><button class="btn btn-sm ${link.micEnabled ? 'btn-danger' : ''}" data-mic-toggle="${link.id}">${link.micEnabled ? 'Mic off' : 'Mic on'}</button><button class="btn btn-sm" data-device-remove="${link.id}" title="Remove device">Delete</button></div>`;
+    return `<div class="activity-item"><span class="vehicle-photo" style="width:34px;height:34px;font-size:17px">♙</span><div class="device-row-main"><button class="device-number" data-device-open="${link.id}">${link.phone || 'Registered phone'}</button><small>${link.vehicleId ? vehicleNames[link.vehicleId] || link.vehicleId : 'Phone only'} · Last seen ${lastSeen}${position ? ` · ${position}` : ''} · Camera ${link.cameraEnabled ? 'on' : 'off'} · Mic ${link.micEnabled ? 'on' : 'off'}</small><div class="device-controls" data-device-controls="${link.id}" hidden><button class="btn btn-sm ${link.cameraEnabled ? 'btn-danger' : 'btn-primary'}" data-camera-toggle="${link.id}">${link.cameraEnabled ? 'Camera off' : 'Camera on'}</button><select class="camera-facing" data-camera-facing="${link.id}" aria-label="Camera side"><option value="back" ${(link.cameraFacing || 'back') === 'back' ? 'selected' : ''}>Back camera</option><option value="front" ${link.cameraFacing === 'front' ? 'selected' : ''}>Front camera</option></select><button class="btn btn-sm ${link.micEnabled ? 'btn-danger' : ''}" data-mic-toggle="${link.id}">${link.micEnabled ? 'Mic off' : 'Mic on'}</button><button class="btn btn-sm" data-device-remove="${link.id}" title="Remove device">Delete</button></div></div><span class="badge ${badge}">● ${status}</span></div>`;
   }).join('') : '<div class="empty-state" style="padding:16px 0">No registered mobile devices yet.</div>';
   return `<section class="panel" style="margin-top:18px"><div class="panel-header"><div><div class="panel-title">Registered phones</div><div class="panel-subtitle">Live movement from consented mobile devices · refreshes every 5 seconds</div></div><span class="badge live">${links.length} connected</span></div><div class="activity-list">${rows}</div></section>`;
 }
@@ -308,7 +308,9 @@ function renderView(view = state.view) {
   pageWrap.querySelectorAll('[data-vehicle]').forEach(el => el.addEventListener('click', () => { state.selectedVehicle = Number(el.dataset.vehicle); showToast(`${vehicles[state.selectedVehicle].name} selected`); renderView('home'); }));
   pageWrap.querySelectorAll('[data-device-remove]').forEach(el => el.addEventListener('click', () => removeDevice(el.dataset.deviceRemove)));
   pageWrap.querySelectorAll('[data-mic-toggle]').forEach(el => el.addEventListener('click', () => toggleMicrophone(el.dataset.micToggle)));
-  pageWrap.querySelectorAll('[data-camera-connect]').forEach(el => el.addEventListener('click', () => openCameraConsentModal(el.dataset.cameraConnect)));
+  pageWrap.querySelectorAll('[data-device-open]').forEach(el => el.addEventListener('click', () => toggleDeviceControls(el.dataset.deviceOpen)));
+  pageWrap.querySelectorAll('[data-camera-toggle]').forEach(el => el.addEventListener('click', () => toggleCamera(el.dataset.cameraToggle)));
+  pageWrap.querySelectorAll('[data-camera-facing]').forEach(el => el.addEventListener('change', () => changeCameraFacing(el.dataset.cameraFacing, el.value)));
   pageWrap.querySelectorAll('[data-action]').forEach(el => el.addEventListener('click', () => handleAction(el.dataset.action)));
   requestAnimationFrame(refreshLiveMap);
 }
@@ -371,7 +373,7 @@ function openCameraConsentModal(deviceId) {
 
 async function refreshCameraFeeds() {
   const feeds = [...document.querySelectorAll('[data-camera-feed]')];
-  await Promise.all(feeds.map(async feed => { try { const response = await fetch(`/api/camera/${encodeURIComponent(feed.dataset.cameraFeed)}`); if (!response.ok) return; const frame = await response.json(); if (!frame.image) return; feed.src = `data:${frame.contentType || 'image/jpeg'};base64,${frame.image}`; feed.hidden = false; const card = feed.closest('.camera-card'); card?.querySelector('[data-camera-placeholder]')?.setAttribute('hidden', ''); const state = card?.querySelector('[data-camera-state]'); if (state) state.textContent = `Live snapshot · ${new Date(frame.receivedAt).toLocaleTimeString()}`; } catch (_) {} }));
+  await Promise.all(feeds.map(async feed => { try { const link = (liveData?.deviceLinks || []).find(item => item.id === feed.dataset.cameraFeed); if (!link?.cameraEnabled) return; const response = await fetch(`/api/camera/${encodeURIComponent(feed.dataset.cameraFeed)}`); if (!response.ok) return; const frame = await response.json(); if (!frame.image) return; feed.src = `data:${frame.contentType || 'image/jpeg'};base64,${frame.image}`; feed.hidden = false; const card = feed.closest('.camera-card'); card?.querySelector('[data-camera-placeholder]')?.setAttribute('hidden', ''); const state = card?.querySelector('[data-camera-state]'); if (state) state.textContent = `Live snapshot · ${new Date(frame.receivedAt).toLocaleTimeString()}`; } catch (_) {} }));
 }
 
 async function refreshMicrophoneFeeds() {
@@ -386,6 +388,26 @@ async function toggleMicrophone(deviceId) {
     const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ micEnabled: enabled }) });
     const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Could not update microphone');
     link.micEnabled = enabled; showToast(enabled ? 'Microphone on — waiting for phone permission and audio' : 'Microphone off'); renderView('home');
+  } catch (error) { showToast(error.message); }
+}
+
+function toggleDeviceControls(deviceId) { const controls = document.querySelector(`[data-device-controls="${CSS.escape(deviceId)}"]`); if (controls) controls.hidden = !controls.hidden; }
+
+async function toggleCamera(deviceId) {
+  const link = (liveData?.deviceLinks || []).find(item => item.id === deviceId); if (!link) return;
+  const enabled = !Boolean(link.cameraEnabled);
+  try {
+    const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cameraEnabled: enabled }) });
+    const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Could not update camera');
+    link.cameraEnabled = enabled; showToast(enabled ? 'Camera on — waiting for phone permission and frames' : 'Camera off'); renderView('home');
+  } catch (error) { showToast(error.message); }
+}
+
+async function changeCameraFacing(deviceId, cameraFacing) {
+  try {
+    const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cameraFacing }) });
+    const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Could not change camera');
+    const link = (liveData?.deviceLinks || []).find(item => item.id === deviceId); if (link) link.cameraFacing = cameraFacing; showToast(`${cameraFacing === 'front' ? 'Front' : 'Back'} camera selected`);
   } catch (error) { showToast(error.message); }
 }
 
