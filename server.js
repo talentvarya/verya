@@ -146,14 +146,22 @@ function refreshSummary(data) {
       const step = distanceMeters(previous.raw, current.raw);
       if (step <= 10000) meters += step;
       const accuracy = Math.max(Number(previous.raw.accuracy || 20), Number(current.raw.accuracy || 20), 12);
-      const moving = Number(previous.raw.speed || 0) > 3 || step > accuracy;
+      const moving = Math.max(Number(previous.raw.speed || 0), Number(current.raw.speed || 0)) > 3 || step > accuracy;
       const elapsed = Math.min(gap, 5 * 60 * 1000);
+      if (moving) drivingMilliseconds += elapsed;
+      else idleMilliseconds += elapsed;
+    }
+    const latest = items[items.length - 1];
+    const liveGap = Date.now() - latest.receivedAt;
+    if (liveGap > 0 && liveGap <= 5 * 60 * 1000) {
+      const moving = Number(latest.raw.speed || 0) > 3;
+      const elapsed = Math.min(liveGap, 5 * 60 * 1000);
       if (moving) drivingMilliseconds += elapsed;
       else idleMilliseconds += elapsed;
     }
   });
   const activeAlerts = (data.alerts || []).filter(alert => alert.state === 'Open').length;
-  data.summary = { distance: `${(Number(data.distanceMetersTotal || 0) / 1000).toFixed(2)} km`, driving: formatDuration(drivingMilliseconds), idle: `${Math.floor(idleMilliseconds / 60000)} m`, alerts: activeAlerts };
+  data.summary = { distance: `${(Number(data.distanceMetersTotal || 0) / 1000).toFixed(2)} km`, driving: formatDuration(drivingMilliseconds), idle: formatDuration(idleMilliseconds), alerts: activeAlerts };
 }
 function allowRequest(key, limit, windowMs) {
   const now = Date.now(); const current = requestWindows.get(key) || { count: 0, startedAt: now };

@@ -27,6 +27,10 @@ async function request(route, options = {}) {
   const overspeed = await request('/api/ingest/position', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vehicleId: 'TEST0001', lat: 28.551, lng: 77.201, speed: 95, source: 'test-overspeed' }) }); assert.equal(overspeed.status, 200);
   const overspeedState = await request('/api/bootstrap'); assert.equal(overspeedState.json.summary.alerts, 1); assert.equal(overspeedState.json.alerts[0].type, 'overspeed');
   const safeSpeed = await request('/api/ingest/position', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ vehicleId: 'TEST0001', lat: 28.552, lng: 77.202, speed: 80, source: 'test-safe-speed' }) }); assert.equal(safeSpeed.status, 200);
+  const durationData = JSON.parse(fs.readFileSync(dataFile, 'utf8')); const durationNow = Date.now();
+  durationData.events.slice(0, 3).forEach((event, index) => { event.receivedAt = new Date(durationNow - (2 - index) * 60000).toISOString(); event.raw.speed = 31; });
+  fs.writeFileSync(dataFile, JSON.stringify(durationData, null, 2));
+  const durationState = await request('/api/bootstrap'); assert.match(durationState.json.summary.driving, /^0 h 0[2-9] m$/); assert.equal(durationState.json.summary.idle, '0 h 00 m');
   const resolvedOverspeed = await request('/api/bootstrap'); assert.equal(resolvedOverspeed.json.summary.alerts, 0); assert.equal(resolvedOverspeed.json.alerts[0].state, 'Resolved');
   const fence = await request('/api/geofences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Test depot', type: 'Depot' }) }); assert.equal(fence.status, 201);
   const otp = await request('/api/phone/request', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: '+919999999999', vehicleId: 'TEST0001' }) }); assert.equal(otp.status, 200); assert.equal(otp.json.mode, 'demo');
