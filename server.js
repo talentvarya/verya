@@ -282,7 +282,7 @@ function resolveAccess(data, req) {
 }
 function scopeDataForRequest(data, req) {
   const access = req.accessContext;
-  if (!access || access.isAdmin) { const visible = JSON.parse(JSON.stringify(data)); visible.session.role = 'owner'; visible.groups = visible.groups.map(({ code, codeHash, ...group }) => group); return visible; }
+  if (!access || access.isAdmin) { const visible = JSON.parse(JSON.stringify(data)); visible.session.role = 'owner'; visible.groups = visible.groups.map(({ codeHash, ...group }) => group); return visible; }
   const scoped = JSON.parse(JSON.stringify(data));
   const groupId = access.group.id;
   const vehicleIds = new Set(scoped.vehicles.filter(item => item.groupId === groupId).map(item => item.id));
@@ -488,7 +488,7 @@ async function handler(req, res) {
     if (pathname === '/api/groups' && req.method === 'GET') {
       const data = await readData();
       const groups = req.accessContext.isAdmin ? data.groups : data.groups.filter(group => group.id === req.accessContext.group.id);
-      return send(res, 200, groups.map(group => { const { code, codeHash, ...visible } = group; return { ...visible, members: data.groupMembers.filter(member => member.groupId === group.id).length, vehicles: data.vehicles.filter(vehicle => vehicle.groupId === group.id).length }; }));
+      return send(res, 200, groups.map(group => { const { codeHash, ...visible } = group; if (!req.accessContext.isAdmin) delete visible.code; return { ...visible, members: data.groupMembers.filter(member => member.groupId === group.id).length, vehicles: data.vehicles.filter(vehicle => vehicle.groupId === group.id).length }; }));
     }
     if (pathname === '/api/groups' && req.method === 'POST') {
       const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'create groups'); const input = await body(req); const name = String(input.name || '').trim(); const registeredEmail = String(input.email || '').trim().toLowerCase(); const requestedPassword = String(input.password || ''); const registrationType = ['individual', 'family', 'fleet'].includes(String(input.registrationType || '').toLowerCase()) ? String(input.registrationType).toLowerCase() : 'individual'; if (!name) return send(res, 400, { error: 'Group name is required.' });
@@ -499,13 +499,35 @@ async function handler(req, res) {
       let managedUser;
       try { managedUser = await createManagedAuthUser(registeredEmail, initialPassword, name); } catch (error) { return send(res, 400, { error: error.message }); }
       let code = createGroupCode(); while (data.groups.some(group => group.codeHash === groupCodeHash(code))) code = createGroupCode();
-      const group = { id: `GR-${Date.now()}`, name, registrationType, codeHash: groupCodeHash(code), ownerUserId: managedUser.id || null, ownerEmail: registeredEmail, state: 'Active', createdAt: new Date().toISOString() };
+      const group = { id: `GR-${Date.now()}`, name, registrationType, code, codeHash: groupCodeHash(code), ownerUserId: managedUser.id || null, ownerEmail: registeredEmail, state: 'Active', createdAt: new Date().toISOString() };
       const member = { id: `GM-${Date.now()}`, userId: managedUser.id || null, name, email: registeredEmail, groupId: group.id, role: registrationType === 'fleet' ? 'Fleet owner' : 'Household member', scope: 'All vehicles', state: 'Active', invitedAt: new Date().toISOString() };
       data.groups.push(group); data.members.push(member); data.groupMembers.push(member); audit(data, `Registered ${registrationType} group ${name} for ${registeredEmail}.`); await writeData(data); return send(res, 201, { ...group, code, registeredEmail, initialPassword, members: 1, vehicles: 0 });
     }
     if (pathname === '/api/groups/assign' && req.method === 'POST') {
       const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'assign group access'); const input = await body(req); const group = data.groups.find(item => item.id === input.groupId && item.state === 'Active'); if (!group) return send(res, 404, { error: 'Group not found.' });
       const targetType = input.targetType === 'device' ? 'device' : 'vehicle'; const target = targetType === 'device' ? data.deviceLinks.find(item => item.id === input.targetId) : data.vehicles.find(item => item.id === input.targetId); if (!target) return send(res, 404, { error: 'Device or vehicle not found.' }); target.groupId = group.id; if (targetType === 'vehicle') data.deviceLinks.filter(item => item.vehicleId === target.id).forEach(item => { item.groupId = group.id; }); audit(data, `Assigned ${target.name || target.phone || target.id} to ${group.name}.`); await writeData(data); return send(res, 200, { ok: true, groupId: group.id, targetId: target.id });
+    }
+    const deviceGroupMatch = pathname.match(/^\/api\/device-links\/([^/]+)\/group$/);
+    if (deviceGroupMatch && req.method === 'POST') {
+      const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'move devices between groups');
+      const device = data.deviceLinks.find(item => item.id === decodeURIComponent(deviceGroupMatch[1])); if (!device) return send(res, 404, { error: 'Registered phone not found.' });
+      const input = await body(req); const groupCode = String(input.groupCode || '').trim().toUpperCase();
+      if (!groupCode) return send(res, 400, { error: 'Group Code is required to shift a phone.' });
+      const group = input.groupId ? data.groups.find(item => item.id === input.groupId && item.state === 'Active') : null;
+      if (!group) return send(res, 404, { error: 'Target group not found.' });
+      if (groupCode && group.codeHash !== groupCodeHash(groupCode)) return send(res, 403, { error: 'Group Code does not match the selected group.' });
+      if (!group.code && groupCode) group.code = groupCode;
+      device.groupId = group.id; if (device.vehicleId) { const vehicle = data.vehicles.find(item => item.id === device.vehicleId); if (vehicle) vehicle.groupId = group.id; }
+      audit(data, `Moved ${device.phone || device.id} to ${group.name}.`); await writeData(data); return send(res, 200, { ok: true, groupId: group.id, groupName: group.name, deviceLinkId: device.id });
+    }
+    const resetMemberMatch = pathname.match(/^\/api\/group\/members\/([^/]+)\/reset-password$/);
+    if (resetMemberMatch && req.method === 'POST') {
+      const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'reset member passwords');
+      const member = data.groupMembers.find(item => item.id === decodeURIComponent(resetMemberMatch[1])); if (!member) return send(res, 404, { error: 'Group member not found.' });
+      if (!member.userId || !SUPABASE_ENABLED) return send(res, 400, { error: 'This member does not have a managed Supabase account.' });
+      const newPassword = temporaryPassword();
+      try { await supabaseAdminAuthRequest(`admin/users/${encodeURIComponent(member.userId)}`, { password: newPassword }, { method: 'PUT' }); } catch (error) { return send(res, 400, { error: error.message }); }
+      audit(data, `Reset the password for ${member.email || member.name}.`); await writeData(data); return send(res, 200, { ok: true, email: member.email, temporaryPassword: newPassword });
     }
     if (pathname === '/api/group/invite' && req.method === 'POST') {
       const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'invite members'); const input = await body(req); if (!input.name) return send(res, 400, { error: 'Name is required.' });
