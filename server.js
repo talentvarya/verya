@@ -62,6 +62,7 @@ function normalizeData(data) {
   data.settings ||= {};
   data.settings.overspeedThresholdKph ??= 90;
   data.settings.alertBellEnabled ??= true;
+  data.alertPolicies ||= {};
   data.deviceLinks ||= [];
   data.dailyDistanceMeters ||= {};
   rebuildDailyDistance(data);
@@ -158,16 +159,18 @@ function migrateDistanceTotals(data) {
 }
 function formatDuration(milliseconds) { const minutes = Math.max(0, Math.floor(milliseconds / 60000)); return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} m`; }
 function updateOverspeedAlert(data, { vehicle, link, speed }) {
-  const threshold = Number(data.settings?.overspeedThresholdKph || 90);
   const targetId = link?.id || vehicle?.id;
   if (!targetId) return;
+  const policy = getAlertPolicy(data, targetId);
+  const threshold = policy.thresholdKph;
   const subject = vehicle?.name || link?.phone || 'Connected device';
   const openAlert = (data.alerts || []).find(alert => alert.type === 'overspeed' && alert.targetId === targetId && alert.state === 'Open');
   if (speed > threshold) {
-    if (openAlert) { openAlert.speed = speed; openAlert.threshold = threshold; openAlert.lastSeenAt = new Date().toISOString(); openAlert.detail = `${subject} is travelling at ${Number(speed).toFixed(1)} km/h, above the ${threshold} km/h limit.`; }
-    else { const alert = { id: `A-${Date.now()}`, type: 'overspeed', targetId, vehicleId: vehicle?.id || null, deviceLinkId: link?.id || null, title: 'Overspeed warning', detail: `${subject} is travelling at ${Number(speed).toFixed(1)} km/h, above the ${threshold} km/h limit.`, severity: 'High', state: 'Open', speed, threshold, createdAt: new Date().toISOString() }; data.alerts.unshift(alert); data.alerts = data.alerts.slice(0, 50); audit(data, `Overspeed warning for ${subject}: ${speed} km/h.`); }
+    if (openAlert) { openAlert.speed = speed; openAlert.threshold = threshold; openAlert.bellEnabled = policy.bellEnabled; openAlert.lastSeenAt = new Date().toISOString(); openAlert.detail = `${subject} is travelling at ${Number(speed).toFixed(1)} km/h, above the ${threshold} km/h limit.`; }
+    else { const alert = { id: `A-${Date.now()}`, type: 'overspeed', targetId, vehicleId: vehicle?.id || null, deviceLinkId: link?.id || null, title: 'Overspeed warning', detail: `${subject} is travelling at ${Number(speed).toFixed(1)} km/h, above the ${threshold} km/h limit.`, severity: 'High', state: 'Open', speed, threshold, bellEnabled: policy.bellEnabled, createdAt: new Date().toISOString() }; data.alerts.unshift(alert); data.alerts = data.alerts.slice(0, 50); audit(data, `Overspeed warning for ${subject}: ${speed} km/h.`); }
   } else if (openAlert) { openAlert.state = 'Resolved'; openAlert.resolvedAt = new Date().toISOString(); openAlert.detail = `${subject} returned to ${speed} km/h; overspeed warning resolved.`; audit(data, `Resolved overspeed warning for ${subject}.`); }
 }
+function getAlertPolicy(data, targetId) { const saved = data.alertPolicies?.[targetId] || {}; return { thresholdKph: Math.max(10, Math.min(300, Math.round(Number(saved.thresholdKph ?? data.settings?.overspeedThresholdKph ?? 90)))), bellEnabled: saved.bellEnabled ?? data.settings?.alertBellEnabled !== false }; }
 function refreshSummary(data) {
   migrateDistanceTotals(data);
   if (!Number.isFinite(Number(data.distanceMetersTotal))) data.distanceMetersTotal = historicalDistanceMeters(data);
@@ -277,7 +280,7 @@ async function handler(req, res) {
     if (pathname.startsWith('/api/') && !publicApi) { const user = await requireAuth(req, res); if (!user) return; }
 
     if (pathname === '/api/health' && req.method === 'GET') return send(res, 200, { ok: true, service: 'veyra-local-mvp', persistence: SUPABASE_ENABLED ? 'supabase' : 'local-json', time: new Date().toISOString() });
-    if (pathname === '/api/bootstrap' && req.method === 'GET') { const data = await readData(); data.session.user = req.authUser.email; data.session.email = req.authUser.email; return send(res, 200, { ...data, dailyReports: dailyDistanceReports(data), mapConfig: { provider: GOOGLE_MAPS_API_KEY ? 'google' : 'leaflet', googleMapsApiKey: GOOGLE_MAPS_API_KEY }, permissions: permissions(data.session.role) }); }
+    if (pathname === '/api/bootstrap' && req.method === 'GET') { const data = await readData(); data.session.user = req.authUser.email; data.session.email = req.authUser.email; return send(res, 200, { ...data, dailyReports: dailyDistanceReports(data), alertPolicies: data.alertPolicies, mapConfig: { provider: GOOGLE_MAPS_API_KEY ? 'google' : 'leaflet', googleMapsApiKey: GOOGLE_MAPS_API_KEY }, permissions: permissions(data.session.role) }); }
     if (pathname === '/api/session' && req.method === 'GET') { const data = await readData(); data.session.user = req.authUser.email; data.session.email = req.authUser.email; return send(res, 200, { ...data.session, permissions: permissions(data.session.role) }); }
     if (pathname === '/api/session' && req.method === 'PATCH') {
       const input = await body(req); const role = String(input.role || '').toLowerCase();
@@ -389,6 +392,16 @@ async function handler(req, res) {
       if (input.parkingThresholdMinutes !== undefined) data.settings.parkingThresholdMinutes = input.parkingThresholdMinutes;
       if (input.timezone !== undefined) data.settings.timezone = String(input.timezone);
       audit(data, 'Updated workspace activity and overspeed alert settings.'); await writeData(data); return send(res, 200, data.settings);
+    }
+
+    const alertPolicyMatch = pathname.match(/^\/api\/alert-policies\/([^/]+)$/);
+    if (alertPolicyMatch && req.method === 'PATCH') {
+      const targetId = decodeURIComponent(alertPolicyMatch[1]); const data = await readData(); if (!can(data, 'managePolicies')) return deny(res, 'update overspeed policies');
+      const exists = (data.deviceLinks || []).some(link => link.id === targetId) || (data.vehicles || []).some(vehicle => vehicle.id === targetId); if (!exists) return send(res, 404, { error: 'Vehicle or device not found.' });
+      const input = await body(req); const current = getAlertPolicy(data, targetId); const next = { thresholdKph: current.thresholdKph, bellEnabled: current.bellEnabled };
+      if (input.thresholdKph !== undefined) { const threshold = Number(input.thresholdKph); if (!Number.isFinite(threshold) || threshold < 10 || threshold > 300) return send(res, 400, { error: 'Speed limit must be between 10 and 300 km/h.' }); next.thresholdKph = Math.round(threshold); }
+      if (input.bellEnabled !== undefined) next.bellEnabled = Boolean(input.bellEnabled);
+      data.alertPolicies[targetId] = next; audit(data, `Updated overspeed policy for ${targetId}.`); await writeData(data); return send(res, 200, { targetId, ...next });
     }
 
     if (pathname === '/api/simulator/tick' && req.method === 'POST') {

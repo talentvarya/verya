@@ -38,6 +38,7 @@ let toastTimer;
 
 function icon(symbol, cls = '') { return `<span class="timeline-dot ${cls}">${symbol}</span>`; }
 function alertDateTime(alert) { const value = alert.createdAt || alert.lastSeenAt || alert.resolvedAt; return value ? new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : 'Date/time unavailable'; }
+function clientAlertPolicy(targetId) { const saved = liveData?.alertPolicies?.[targetId] || {}; return { thresholdKph: Number(saved.thresholdKph || liveData?.settings?.overspeedThresholdKph || 90), bellEnabled: saved.bellEnabled ?? liveData?.settings?.alertBellEnabled !== false }; }
 function unlockAlertBell() { try { alertAudioContext ||= new (window.AudioContext || window.webkitAudioContext)(); if (alertAudioContext.state === 'suspended') alertAudioContext.resume(); } catch (_) {} }
 function playAlertBell() { if (liveData?.settings?.alertBellEnabled === false) return; try { unlockAlertBell(); if (!alertAudioContext) return; const now = alertAudioContext.currentTime; [880, 660].forEach((frequency, index) => { const oscillator = alertAudioContext.createOscillator(); const gain = alertAudioContext.createGain(); oscillator.type = 'sine'; oscillator.frequency.value = frequency; gain.gain.setValueAtTime(0.0001, now + index * 0.18); gain.gain.exponentialRampToValueAtTime(0.18, now + index * 0.18 + 0.02); gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.18 + 0.16); oscillator.connect(gain).connect(alertAudioContext.destination); oscillator.start(now + index * 0.18); oscillator.stop(now + index * 0.18 + 0.18); }); } catch (_) {} }
 function updateNotificationBell(alerts = []) {
@@ -48,7 +49,8 @@ function updateNotificationBell(alerts = []) {
   if (badge) { badge.textContent = openAlerts.length > 99 ? '99+' : String(openAlerts.length); badge.hidden = openAlerts.length === 0; }
   if (button) { button.setAttribute('aria-label', openAlerts.length ? `${openAlerts.length} active warning${openAlerts.length === 1 ? '' : 's'}` : 'No active warnings'); button.title = bellEnabled ? 'Warnings bell on · click to open alerts' : 'Warnings bell off · click to open alerts'; button.classList.toggle('muted', !bellEnabled); }
   const fresh = openAlerts.filter(alert => !knownOpenAlertIds.has(alert.id));
-  if (notificationBaselineReady && fresh.length && bellEnabled) {
+  const shouldRing = fresh.some(alert => clientAlertPolicy(alert.targetId || alert.deviceLinkId || alert.vehicleId).bellEnabled) && bellEnabled;
+  if (notificationBaselineReady && fresh.length && shouldRing) {
     const alert = fresh[0];
     showToast(`${alert.title}: ${alert.detail}`);
     playAlertBell();
@@ -339,7 +341,8 @@ function renderDevicePanel() {
     const badge = status === 'Moving' ? 'live' : status === 'Offline' ? 'warning' : 'parked';
     const lastSeen = link.lastSeen ? new Date(link.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Not started';
     const position = link.lastPosition?.lat && link.lastPosition?.lng ? `<a class="text-button" href="https://www.google.com/maps/search/?api=1&query=${link.lastPosition.lat},${link.lastPosition.lng}" target="_blank" rel="noreferrer">Open location ↗</a>` : '';
-    return `<div class="activity-item"><span class="vehicle-photo" style="width:34px;height:34px;font-size:17px">♙</span><div class="device-row-main"><button class="device-number" data-device-open="${link.id}">${link.phone || 'Registered phone'}</button><small>${link.vehicleId ? vehicleNames[link.vehicleId] || link.vehicleId : 'Phone only'} · Last seen ${lastSeen}${position ? ` · ${position}` : ''} · Speed ${Number(link.speed || 0).toFixed(1)} km/h · Camera ${link.cameraEnabled ? 'on' : 'off'} · Mic ${link.micEnabled ? 'on' : 'off'}</small><div class="device-controls" data-device-controls="${link.id}" hidden><button class="btn btn-sm ${link.cameraEnabled ? 'btn-danger' : 'btn-primary'}" data-camera-toggle="${link.id}">${link.cameraEnabled ? 'Camera off' : 'Camera on'}</button><select class="camera-facing" data-camera-facing="${link.id}" aria-label="Camera side"><option value="back" ${(link.cameraFacing || 'back') === 'back' ? 'selected' : ''}>Back camera</option><option value="front" ${link.cameraFacing === 'front' ? 'selected' : ''}>Front camera</option></select><button class="btn btn-sm ${link.micEnabled ? 'btn-danger' : ''}" data-mic-toggle="${link.id}">${link.micEnabled ? 'Mic off' : 'Mic on'}</button><button class="btn btn-sm" data-device-remove="${link.id}" title="Remove device">Delete</button></div></div><span class="badge ${badge}">● ${status}</span></div>`;
+    const policy = clientAlertPolicy(link.id);
+    return `<div class="activity-item"><span class="vehicle-photo" style="width:34px;height:34px;font-size:17px">♙</span><div class="device-row-main"><button class="device-number" data-device-open="${link.id}">${link.phone || 'Registered phone'}</button><small>${link.vehicleId ? vehicleNames[link.vehicleId] || link.vehicleId : 'Phone only'} · Last seen ${lastSeen}${position ? ` · ${position}` : ''} · Speed ${Number(link.speed || 0).toFixed(1)} km/h · Camera ${link.cameraEnabled ? 'on' : 'off'} · Mic ${link.micEnabled ? 'on' : 'off'}</small><div class="alert-policy-controls"><span>Limit</span><button class="btn btn-sm" data-policy-adjust="-5" data-policy-target="${link.id}">−5</button><input class="policy-limit-input" data-policy-limit="${link.id}" type="number" min="10" max="300" value="${policy.thresholdKph}" aria-label="Speed limit for ${link.phone || 'device'}"><span>km/h</span><button class="btn btn-sm" data-policy-adjust="5" data-policy-target="${link.id}">+5</button><button class="btn btn-sm btn-primary" data-policy-save="${link.id}">Apply</button><button class="btn btn-sm ${policy.bellEnabled ? 'btn-primary' : ''}" data-policy-bell="${link.id}">${policy.bellEnabled ? '🔔 Bell on' : '🔕 Bell off'}</button></div><div class="device-controls" data-device-controls="${link.id}" hidden><button class="btn btn-sm ${link.cameraEnabled ? 'btn-danger' : 'btn-primary'}" data-camera-toggle="${link.id}">${link.cameraEnabled ? 'Camera off' : 'Camera on'}</button><select class="camera-facing" data-camera-facing="${link.id}" aria-label="Camera side"><option value="back" ${(link.cameraFacing || 'back') === 'back' ? 'selected' : ''}>Back camera</option><option value="front" ${link.cameraFacing === 'front' ? 'selected' : ''}>Front camera</option></select><button class="btn btn-sm ${link.micEnabled ? 'btn-danger' : ''}" data-mic-toggle="${link.id}">${link.micEnabled ? 'Mic off' : 'Mic on'}</button><button class="btn btn-sm" data-device-remove="${link.id}" title="Remove device">Delete</button></div></div><span class="badge ${badge}">● ${status}</span></div>`;
   }).join('') : '<div class="empty-state" style="padding:16px 0">No registered mobile devices yet.</div>';
   return `<section class="panel" style="margin-top:18px"><div class="panel-header"><div><div class="panel-title">Registered phones</div><div class="panel-subtitle">Live movement from consented mobile devices · refreshes every 5 seconds</div></div><span class="badge live">${links.length} connected</span></div><div class="activity-list">${rows}</div></section>`;
 }
@@ -372,6 +375,9 @@ function renderView(view = state.view) {
   pageWrap.querySelectorAll('[data-speed-adjust]').forEach(el => el.addEventListener('click', () => { const input = pageWrap.querySelector('[data-speed-limit]'); if (input) input.value = Math.max(10, Math.min(300, Number(input.value || 90) + Number(el.dataset.speedAdjust))); }));
   pageWrap.querySelectorAll('[data-speed-save]').forEach(el => el.addEventListener('click', saveOverspeedSettings));
   pageWrap.querySelectorAll('[data-bell-toggle]').forEach(el => el.addEventListener('click', toggleAlertBell));
+  pageWrap.querySelectorAll('[data-policy-adjust]').forEach(el => el.addEventListener('click', () => { const input = pageWrap.querySelector(`[data-policy-limit="${CSS.escape(el.dataset.policyTarget)}"]`); if (input) input.value = Math.max(10, Math.min(300, Number(input.value || 90) + Number(el.dataset.policyAdjust))); }));
+  pageWrap.querySelectorAll('[data-policy-save]').forEach(el => el.addEventListener('click', () => saveDeviceAlertPolicy(el.dataset.policySave)));
+  pageWrap.querySelectorAll('[data-policy-bell]').forEach(el => el.addEventListener('click', () => toggleDeviceAlertBell(el.dataset.policyBell)));
   pageWrap.querySelectorAll('[data-action]').forEach(el => el.addEventListener('click', () => handleAction(el.dataset.action)));
   requestAnimationFrame(refreshLiveMap);
 }
@@ -430,6 +436,16 @@ async function toggleAlertBell() {
   const enabled = liveData?.settings?.alertBellEnabled === false;
   if (enabled) { unlockAlertBell(); await enableBrowserNotifications(); }
   try { const response = await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alertBellEnabled: enabled }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Could not update warning bell'); liveData.settings = { ...liveData.settings, ...result }; showToast(enabled ? 'Warning bell on' : 'Warning bell off'); renderView('settings'); } catch (error) { showToast(error.message); }
+}
+async function saveDeviceAlertPolicy(targetId) {
+  const input = document.querySelector(`[data-policy-limit="${CSS.escape(targetId)}"]`); const thresholdKph = Number(input?.value || 90);
+  if (!Number.isFinite(thresholdKph) || thresholdKph < 10 || thresholdKph > 300) return showToast('Speed limit must be between 10 and 300 km/h');
+  try { const response = await fetch(`/api/alert-policies/${encodeURIComponent(targetId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ thresholdKph }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Could not update vehicle speed limit'); liveData.alertPolicies = { ...(liveData.alertPolicies || {}), [targetId]: result }; showToast(`Vehicle limit set to ${result.thresholdKph} km/h`); renderView('home'); } catch (error) { showToast(error.message); }
+}
+async function toggleDeviceAlertBell(targetId) {
+  const current = clientAlertPolicy(targetId); const bellEnabled = !current.bellEnabled;
+  if (bellEnabled) { unlockAlertBell(); await enableBrowserNotifications(); }
+  try { const response = await fetch(`/api/alert-policies/${encodeURIComponent(targetId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bellEnabled }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Could not update vehicle warning bell'); liveData.alertPolicies = { ...(liveData.alertPolicies || {}), [targetId]: result }; showToast(bellEnabled ? 'Vehicle warning bell on' : 'Vehicle warning bell off'); renderView('home'); } catch (error) { showToast(error.message); }
 }
 
 function downloadReport() {
