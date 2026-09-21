@@ -47,6 +47,7 @@ const initialData = {
   session: { user: '', role: 'owner', workspace: 'Fleet workspace' },
   geofences: [],
   fuelRecords: [],
+  maintenanceRecords: [],
   events: []
 };
 
@@ -60,6 +61,7 @@ function normalizeData(data) {
   data.geofences ||= [{ id: 'G-001', name: 'Home garage', type: 'Home', status: 'Active' }];
   data.events ||= [];
   data.fuelRecords ||= [];
+  data.maintenanceRecords ||= [];
   data.alerts ||= [];
   data.settings ||= {};
   data.settings.overspeedThresholdKph ??= 90;
@@ -358,6 +360,18 @@ async function handler(req, res) {
 
     if (pathname === '/api/fuel' && req.method === 'POST') {
       const data = await readData(); if (!can(data, 'manageVehicles')) return deny(res, 'add fuel records'); const input = await body(req); const liters = Number(input.liters); const cost = Number(input.cost); if (!input.vehicleId || !Number.isFinite(liters) || liters <= 0 || !Number.isFinite(cost) || cost < 0) return send(res, 400, { error: 'Vehicle, litres and a valid cost are required.' }); const vehicle = data.vehicles.find(item => item.id === input.vehicleId); if (!vehicle) return send(res, 404, { error: 'Vehicle not found.' }); const record = { id: `F-${Date.now()}`, vehicleId: vehicle.id, date: input.date || new Date().toISOString().slice(0, 10), liters: Number(liters.toFixed(2)), cost: Number(cost.toFixed(2)), odometer: input.odometer ? Number(input.odometer) : null, createdAt: new Date().toISOString() }; data.fuelRecords.unshift(record); data.fuelRecords = data.fuelRecords.slice(0, 500); audit(data, `Added fuel record for ${vehicle.name}.`); await writeData(data); return send(res, 201, record);
+    }
+
+    if (pathname === '/api/maintenance' && req.method === 'POST') {
+      const data = await readData(); if (!can(data, 'manageVehicles')) return deny(res, 'add maintenance records');
+      const input = await body(req); const vehicle = data.vehicles.find(item => item.id === input.vehicleId);
+      if (!vehicle) return send(res, 400, { error: 'Select a vehicle first.' });
+      if (!input.type || !input.date) return send(res, 400, { error: 'Service type and service date are required.' });
+      const cost = input.cost === '' || input.cost === undefined ? 0 : Number(input.cost);
+      const odometer = input.odometer === '' || input.odometer === undefined ? null : Number(input.odometer);
+      if (!Number.isFinite(cost) || cost < 0 || (odometer !== null && (!Number.isFinite(odometer) || odometer < 0))) return send(res, 400, { error: 'Cost and odometer must be valid numbers.' });
+      const record = { id: `M-${Date.now()}`, vehicleId: vehicle.id, type: String(input.type).trim(), date: String(input.date), nextDueDate: input.nextDueDate ? String(input.nextDueDate) : null, cost: Number(cost.toFixed(2)), odometer, status: input.status || 'Completed', notes: String(input.notes || '').trim(), createdAt: new Date().toISOString() };
+      data.maintenanceRecords.unshift(record); data.maintenanceRecords = data.maintenanceRecords.slice(0, 500); audit(data, `Added ${record.type} maintenance record for ${vehicle.name}.`); await writeData(data); return send(res, 201, record);
     }
 
     if (pathname === '/api/vehicles' && req.method === 'POST') {
