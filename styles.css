@@ -84,5 +84,6 @@ button { cursor: pointer; }
 .car-marker-svg { width: 32px; height: 46px; }
 .veyra-marker.moving::before { width: 38px; height: 48px; border-radius: 45%; transform: scale(.78); }
 .alert-time { display: block; margin-top: 4px; color: var(--muted-2); font-size: 9px; font-weight: 700; }
+.alert-speed { display: block; margin-top: 4px; color: var(--red); font-size: 10px; font-weight: 800; }
 .notification-glyph { display: block; line-height: 1; font-size: 17px; }.notification-badge { position: absolute; top: -3px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; display: grid; place-items: center; border: 2px solid #fff; border-radius: 999px; color: #fff; background: var(--red); font-size: 8px; font-weight: 800; line-height: 1; }.notification-badge[hidden] { display: none; }
 .mic-live-status { display: block; margin-top: 7px; color: var(--teal-dark); font-size: 10px; font-weight: 800; }.mic-live-status[hidden] { display: none; }
