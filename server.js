@@ -269,7 +269,7 @@ function resolveAccess(data, req) {
 }
 function scopeDataForRequest(data, req) {
   const access = req.accessContext;
-  if (!access || access.isAdmin) { data.session.role = 'owner'; return data; }
+  if (!access || access.isAdmin) { const visible = JSON.parse(JSON.stringify(data)); visible.session.role = 'owner'; visible.groups = visible.groups.map(({ code, codeHash, ...group }) => group); return visible; }
   const scoped = JSON.parse(JSON.stringify(data));
   const groupId = access.group.id;
   const vehicleIds = new Set(scoped.vehicles.filter(item => item.groupId === groupId).map(item => item.id));
@@ -411,8 +411,8 @@ async function handler(req, res) {
     }
     const micMatch = pathname.match(/^\/api\/mic\/([^/]+)$/);
     if (micMatch && req.method === 'GET') { const frame = microphoneFrames.get(decodeURIComponent(micMatch[1])); if (!frame) return send(res, 404, { error: 'No microphone audio received yet.' }); return send(res, 200, frame); }
-    if (pathname === '/api/audit' && req.method === 'GET') return send(res, 200, (await readData()).audit);
-    if (pathname === '/api/geofences' && req.method === 'GET') return send(res, 200, (await readData()).geofences);
+    if (pathname === '/api/audit' && req.method === 'GET') return send(res, 200, scopeDataForRequest(await readData(), req).audit);
+    if (pathname === '/api/geofences' && req.method === 'GET') return send(res, 200, scopeDataForRequest(await readData(), req).geofences);
     if (pathname === '/api/geofences' && req.method === 'POST') {
       const data = await readData(); if (!can(data, 'managePolicies')) return deny(res, 'manage geofences');
       const input = await body(req); if (!input.name) return send(res, 400, { error: 'Geofence name is required.' });
@@ -475,13 +475,13 @@ async function handler(req, res) {
     if (pathname === '/api/groups' && req.method === 'GET') {
       const data = await readData();
       const groups = req.accessContext.isAdmin ? data.groups : data.groups.filter(group => group.id === req.accessContext.group.id);
-      return send(res, 200, groups.map(group => ({ ...group, codeHash: undefined, members: data.groupMembers.filter(member => member.groupId === group.id).length, vehicles: data.vehicles.filter(vehicle => vehicle.groupId === group.id).length })));
+      return send(res, 200, groups.map(group => { const { code, codeHash, ...visible } = group; return { ...visible, members: data.groupMembers.filter(member => member.groupId === group.id).length, vehicles: data.vehicles.filter(vehicle => vehicle.groupId === group.id).length }; }));
     }
     if (pathname === '/api/groups' && req.method === 'POST') {
       const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'create groups'); const input = await body(req); const name = String(input.name || '').trim(); if (!name) return send(res, 400, { error: 'Group name is required.' });
       let code = createGroupCode(); while (data.groups.some(group => group.codeHash === groupCodeHash(code))) code = createGroupCode();
-      const group = { id: `GR-${Date.now()}`, name, code, codeHash: groupCodeHash(code), ownerUserId: req.authUser.id, state: 'Active', createdAt: new Date().toISOString() };
-      data.groups.push(group); audit(data, `Created group ${name}.`); await writeData(data); return send(res, 201, { ...group, members: 0, vehicles: 0 });
+      const group = { id: `GR-${Date.now()}`, name, codeHash: groupCodeHash(code), ownerUserId: req.authUser.id, state: 'Active', createdAt: new Date().toISOString() };
+      data.groups.push(group); audit(data, `Created group ${name}.`); await writeData(data); return send(res, 201, { ...group, code, members: 0, vehicles: 0 });
     }
     if (pathname === '/api/groups/assign' && req.method === 'POST') {
       const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'assign group access'); const input = await body(req); const group = data.groups.find(item => item.id === input.groupId && item.state === 'Active'); if (!group) return send(res, 404, { error: 'Group not found.' });
