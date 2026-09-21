@@ -49,7 +49,7 @@ function updateNotificationBell(alerts = []) {
   if (badge) { badge.textContent = openAlerts.length > 99 ? '99+' : String(openAlerts.length); badge.hidden = openAlerts.length === 0; }
   if (button) { button.setAttribute('aria-label', openAlerts.length ? `${openAlerts.length} active warning${openAlerts.length === 1 ? '' : 's'}` : 'No active warnings'); button.title = bellEnabled ? 'Warnings bell on · click to open alerts' : 'Warnings bell off · click to open alerts'; button.classList.toggle('muted', !bellEnabled); }
   const fresh = openAlerts.filter(alert => !knownOpenAlertIds.has(alert.id));
-  const shouldRing = fresh.some(alert => clientAlertPolicy(alert.targetId || alert.deviceLinkId || alert.vehicleId).bellEnabled) && bellEnabled;
+  const shouldRing = fresh.some(alert => clientAlertPolicy(alert.targetId || alert.deviceLinkId || alert.vehicleId).bellEnabled);
   if (notificationBaselineReady && fresh.length && shouldRing) {
     const alert = fresh[0];
     showToast(`${alert.title}: ${alert.detail}`);
