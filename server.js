@@ -63,6 +63,8 @@ function normalizeData(data) {
   data.settings.overspeedThresholdKph ??= 90;
   data.settings.alertBellEnabled ??= true;
   data.deviceLinks ||= [];
+  data.dailyDistanceMeters ||= {};
+  rebuildDailyDistance(data);
   refreshSummary(data);
   return data;
 }
@@ -111,12 +113,27 @@ function acceptedDistanceMeters(a, b) {
   const step = distanceMeters(a, b); if (!step) return 0;
   const gapSeconds = Math.max(1, Math.min(120, (Number(b.receivedAt || 0) - Number(a.receivedAt || 0)) / 1000 || 10));
   const accuracy = Math.max(Number(a.accuracy || 20), Number(b.accuracy || 20), 12);
-  if (step <= Math.max(accuracy * 1.5, 15)) return 0;
   const reportedSpeed = Math.max(Number(a.speed || 0), Number(b.speed || 0));
-  const plausibleSpeedKph = reportedSpeed > 3 ? Math.max(reportedSpeed * 1.8, 90) : 120;
-  const maxStep = Math.max(150, plausibleSpeedKph / 3.6 * gapSeconds);
+  const movementFloor = reportedSpeed > 3 ? Math.max(accuracy * 1.5, 10) : Math.max(accuracy * 2.5, 25);
+  if (step <= movementFloor) return 0;
+  const maxStep = reportedSpeed > 3 ? Math.max(150, reportedSpeed / 3.6 * gapSeconds * 2.5) : Math.max(35, Math.min(120, gapSeconds * 8));
   return step > maxStep ? null : step;
 }
+function localDayKey(timestamp, timezone = 'Asia/Calcutta') {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(timestamp));
+  return `${parts.find(part => part.type === 'year').value}-${parts.find(part => part.type === 'month').value}-${parts.find(part => part.type === 'day').value}`;
+}
+function rebuildDailyDistance(data) {
+  if (data.dailyDistanceVersion === 1) return;
+  const rebuilt = {};
+  const samples = new Map();
+  (data.events || []).forEach(event => { const raw = event.raw || {}; const lat = Number(raw.lat); const lng = Number(raw.lng); if (!Number.isFinite(lat) || !Number.isFinite(lng)) return; const key = event.deviceLinkId || event.vehicleId; if (!key) return; if (!samples.has(key)) samples.set(key, []); samples.get(key).push({ event, lat, lng, accuracy: Number(raw.accuracy || 20), speed: Number(raw.speed || 0), receivedAt: new Date(event.receivedAt || 0).getTime() }); });
+  samples.forEach(items => { items.sort((a, b) => a.receivedAt - b.receivedAt); for (let index = 1; index < items.length; index += 1) { const previous = items[index - 1]; const current = items[index]; const step = acceptedDistanceMeters(previous, current); current.event.raw.acceptedDistanceMeters = step; if (step === null || step <= 0) continue; const day = localDayKey(current.receivedAt, data.settings?.timezone || 'Asia/Calcutta'); rebuilt[day] ||= {}; rebuilt[day][items[index].event.deviceLinkId || items[index].event.vehicleId] = Number(rebuilt[day][items[index].event.deviceLinkId || items[index].event.vehicleId] || 0) + step; } });
+  data.dailyDistanceMeters = rebuilt;
+  data.dailyDistanceVersion = 1;
+}
+function addDailyDistance(data, key, timestamp, meters) { if (!key || !Number.isFinite(Number(meters)) || Number(meters) <= 0) return; const day = localDayKey(timestamp, data.settings?.timezone || 'Asia/Calcutta'); data.dailyDistanceMeters[day] ||= {}; data.dailyDistanceMeters[day][key] = Number(data.dailyDistanceMeters[day][key] || 0) + Number(meters); }
+function dailyDistanceReports(data) { const keys = [...new Set([...(data.deviceLinks || []).map(link => link.id), ...(data.vehicles || []).map(vehicle => vehicle.id)])]; const days = []; const now = Date.now(); for (let index = 0; index < 7; index += 1) { const date = new Date(now - index * 86400000); const day = localDayKey(date, data.settings?.timezone || 'Asia/Calcutta'); keys.forEach(key => days.push({ day, deviceLinkId: key, km: Number(((data.dailyDistanceMeters?.[day]?.[key] || 0) / 1000).toFixed(2)) })); } return days; }
 function distanceTotalsByKey(data) {
   const samples = new Map();
   (data.events || []).forEach(event => { const raw = event.raw || {}; const lat = Number(raw.lat); const lng = Number(raw.lng); if (!Number.isFinite(lat) || !Number.isFinite(lng)) return; const key = event.deviceLinkId || event.vehicleId || 'fleet'; if (!samples.has(key)) samples.set(key, []); samples.get(key).push({ lat, lng, accuracy: Number(raw.accuracy || 20), speed: Number(raw.speed || 0), receivedAt: new Date(event.receivedAt || 0).getTime() }); });
@@ -128,7 +145,7 @@ function historicalDistanceMeters(data) {
   return [...distanceTotalsByKey(data).values()].reduce((total, meters) => total + meters, 0);
 }
 function migrateDistanceTotals(data) {
-  if (data.distanceFilterVersion === 2) return;
+  if (data.distanceFilterVersion === 3) return;
   const totals = distanceTotalsByKey(data);
   data.distanceMetersTotal = historicalDistanceMeters(data);
   (data.vehicles || []).forEach(vehicle => {
@@ -137,7 +154,7 @@ function migrateDistanceTotals(data) {
     vehicle.distanceMetersTotal = meters;
     vehicle.km = `${(meters / 1000).toFixed(1)} km`;
   });
-  data.distanceFilterVersion = 2;
+  data.distanceFilterVersion = 3;
 }
 function formatDuration(milliseconds) { const minutes = Math.max(0, Math.floor(milliseconds / 60000)); return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} m`; }
 function updateOverspeedAlert(data, { vehicle, link, speed }) {
@@ -173,7 +190,7 @@ function refreshSummary(data) {
       const step = acceptedDistanceMeters({ ...previous.raw, receivedAt: previous.receivedAt }, { ...current.raw, receivedAt: current.receivedAt });
       if (step !== null) meters += step;
       const accuracy = Math.max(Number(previous.raw.accuracy || 20), Number(current.raw.accuracy || 20), 12);
-      const moving = Math.max(Number(previous.raw.speed || 0), Number(current.raw.speed || 0)) > 3 || step > accuracy;
+      const moving = Math.max(Number(previous.raw.speed || 0), Number(current.raw.speed || 0)) > 3 || step > Math.max(accuracy * 2.5, 25);
       const elapsed = Math.min(gap, 5 * 60 * 1000);
       if (moving) drivingMilliseconds += elapsed;
       else idleMilliseconds += elapsed;
@@ -260,7 +277,7 @@ async function handler(req, res) {
     if (pathname.startsWith('/api/') && !publicApi) { const user = await requireAuth(req, res); if (!user) return; }
 
     if (pathname === '/api/health' && req.method === 'GET') return send(res, 200, { ok: true, service: 'veyra-local-mvp', persistence: SUPABASE_ENABLED ? 'supabase' : 'local-json', time: new Date().toISOString() });
-    if (pathname === '/api/bootstrap' && req.method === 'GET') { const data = await readData(); data.session.user = req.authUser.email; data.session.email = req.authUser.email; return send(res, 200, { ...data, mapConfig: { provider: GOOGLE_MAPS_API_KEY ? 'google' : 'leaflet', googleMapsApiKey: GOOGLE_MAPS_API_KEY }, permissions: permissions(data.session.role) }); }
+    if (pathname === '/api/bootstrap' && req.method === 'GET') { const data = await readData(); data.session.user = req.authUser.email; data.session.email = req.authUser.email; return send(res, 200, { ...data, dailyReports: dailyDistanceReports(data), mapConfig: { provider: GOOGLE_MAPS_API_KEY ? 'google' : 'leaflet', googleMapsApiKey: GOOGLE_MAPS_API_KEY }, permissions: permissions(data.session.role) }); }
     if (pathname === '/api/session' && req.method === 'GET') { const data = await readData(); data.session.user = req.authUser.email; data.session.email = req.authUser.email; return send(res, 200, { ...data.session, permissions: permissions(data.session.role) }); }
     if (pathname === '/api/session' && req.method === 'PATCH') {
       const input = await body(req); const role = String(input.role || '').toLowerCase();
@@ -380,7 +397,7 @@ async function handler(req, res) {
     }
     if (pathname === '/api/ingest/position' && req.method === 'POST') {
       const data = await readData(); if (!can(data, 'ingest')) return deny(res, 'ingest position events'); const input = await body(req); const link = input.deviceLinkId ? data.deviceLinks.find(item => item.id === input.deviceLinkId) : null; if (link && !deviceTokenMatches(req, input, link)) return send(res, 401, { error: 'This device is not authorized. Pair it again.' }); const vehicle = data.vehicles.find(item => item.id === input.vehicleId) || (link?.vehicleId ? data.vehicles.find(item => item.id === link.vehicleId) : null); if (!vehicle && !link) return send(res, 404, { error: 'Vehicle or paired device not found.' });
-      const lat = Number(input.lat); const lng = Number(input.lng); const speed = Math.max(0, Number(input.speed || 0)); const accuracy = Math.max(0, Number(input.accuracy || 20)); if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) return send(res, 400, { error: 'A valid latitude and longitude are required.' }); if (!Number.isFinite(speed) || !Number.isFinite(accuracy)) return send(res, 400, { error: 'Speed and accuracy must be valid numbers.' }); const receivedAt = Date.now(); const position = { lat, lng, accuracy, speed, receivedAt, source: input.source || 'Webhook' }; const previousPosition = link?.lastPosition || vehicle?.position; const stepMeters = acceptedDistanceMeters(previousPosition, position); const moving = speed > 3 || (stepMeters !== null && stepMeters > 0); if (stepMeters !== null && stepMeters > 0) { data.distanceMetersTotal = Number(data.distanceMetersTotal || 0) + stepMeters; if (vehicle) { vehicle.distanceMetersTotal = Number(vehicle.distanceMetersTotal || 0) + stepMeters; vehicle.km = `${(vehicle.distanceMetersTotal / 1000).toFixed(1)} km`; } } if (vehicle) { vehicle.position = position; vehicle.speed = `${speed} km/h`; vehicle.status = moving ? 'Moving' : 'Parked'; vehicle.statusClass = vehicle.status === 'Moving' ? 'status-live' : 'status-parked'; vehicle.last = 'Just now'; vehicle.location = input.location || 'Normalized webhook position · just now'; } if (link) { link.lastPosition = position; link.speed = speed; link.status = moving ? 'Moving' : 'Stopped'; link.lastSeen = new Date(receivedAt).toISOString(); } updateOverspeedAlert(data, { vehicle, link, speed }); data.events.unshift({ eventId: input.eventId || `EV-${receivedAt}`, vehicleId: vehicle?.id || null, deviceLinkId: link?.id || input.deviceLinkId || null, type: 'position', receivedAt: new Date(receivedAt).toISOString(), quality: 'Measured', raw: { ...input, acceptedDistanceMeters: stepMeters } }); data.events = data.events.slice(0, 50); audit(data, `Ingested a normalized position event for ${vehicle?.name || link?.phone || 'mobile device'}.`); await writeData(data); return send(res, 200, vehicle || { id: link.id, name: link.phone, status: link.status, speed: `${speed} km/h`, position });
+      const lat = Number(input.lat); const lng = Number(input.lng); const speed = Math.max(0, Number(input.speed || 0)); const accuracy = Math.max(0, Number(input.accuracy || 20)); if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) return send(res, 400, { error: 'A valid latitude and longitude are required.' }); if (!Number.isFinite(speed) || !Number.isFinite(accuracy)) return send(res, 400, { error: 'Speed and accuracy must be valid numbers.' }); const receivedAt = Date.now(); const position = { lat, lng, accuracy, speed, receivedAt, source: input.source || 'Webhook' }; const previousPosition = link?.lastPosition || vehicle?.position; const stepMeters = acceptedDistanceMeters(previousPosition, position); const movementFloor = Math.max(accuracy * 2.5, 25); const moving = speed > 3 || (stepMeters !== null && stepMeters > movementFloor); const reportKey = link?.id || vehicle?.id || input.deviceLinkId || input.vehicleId; if (stepMeters !== null && stepMeters > 0) { data.distanceMetersTotal = Number(data.distanceMetersTotal || 0) + stepMeters; addDailyDistance(data, reportKey, receivedAt, stepMeters); if (vehicle) { vehicle.distanceMetersTotal = Number(vehicle.distanceMetersTotal || 0) + stepMeters; vehicle.km = `${(vehicle.distanceMetersTotal / 1000).toFixed(1)} km`; } } if (vehicle) { vehicle.position = position; vehicle.speed = `${speed} km/h`; vehicle.status = moving ? 'Moving' : 'Parked'; vehicle.statusClass = vehicle.status === 'Moving' ? 'status-live' : 'status-parked'; vehicle.last = 'Just now'; vehicle.location = input.location || 'Normalized webhook position · just now'; } if (link) { link.lastPosition = position; link.speed = speed; link.status = moving ? 'Moving' : 'Stopped'; link.lastSeen = new Date(receivedAt).toISOString(); } updateOverspeedAlert(data, { vehicle, link, speed }); data.events.unshift({ eventId: input.eventId || `EV-${receivedAt}`, vehicleId: vehicle?.id || null, deviceLinkId: link?.id || input.deviceLinkId || null, type: 'position', receivedAt: new Date(receivedAt).toISOString(), quality: 'Measured', raw: { ...input, acceptedDistanceMeters: stepMeters } }); data.events = data.events.slice(0, 5000); audit(data, `Ingested a normalized position event for ${vehicle?.name || link?.phone || 'mobile device'}.`); await writeData(data); return send(res, 200, vehicle || { id: link.id, name: link.phone, status: link.status, speed: `${speed} km/h`, position });
     }
     if (pathname === '/api/ingest/camera' && req.method === 'POST') {
       const input = await body(req); const data = await readData(); const link = input.deviceLinkId ? data.deviceLinks.find(item => item.id === input.deviceLinkId) : null;
