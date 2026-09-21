@@ -368,8 +368,17 @@ async function handler(req, res) {
       const id = String(input.registration).trim().toUpperCase().replace(/\s+/g, '');
       if (data.vehicles.some(vehicle => vehicle.id === id)) return send(res, 409, { error: 'A vehicle with that registration already exists.' });
       const powertrain = ['ICE', 'CNG', 'EV'].includes(input.type) ? input.type : 'ICE';
-      const vehicle = { id, name: String(input.name).trim(), powertrain, icon: powertrain === 'EV' ? '⚡' : powertrain === 'CNG' ? '⛽' : '🚙', trackerType: 'car', status: 'Parked', statusClass: 'status-parked', location: 'Awaiting first location · just now', speed: '—', km: '0.0 km', last: 'Just added', source: 'Setup required', capabilities: ['Vehicle profile'] };
-      data.vehicles.push(vehicle); audit(data, `Added ${vehicle.name} (${vehicle.id}) to the workspace.`); await writeData(data); return send(res, 201, vehicle);
+      const requestedDeviceId = String(input.deviceLinkId || '').trim();
+      const deviceLink = requestedDeviceId ? data.deviceLinks.find(link => link.id === requestedDeviceId) : null;
+      if (requestedDeviceId && !deviceLink) return send(res, 404, { error: 'Registered phone not found.' });
+      const hasCustomIcon = Boolean(String(input.icon || '').trim());
+      const icon = hasCustomIcon ? String(input.icon).trim().slice(0, 4) : (powertrain === 'EV' ? '⚡' : powertrain === 'CNG' ? '⛽' : '🚗');
+      const vehicle = { id, registration: id, name: String(input.name).trim(), model: String(input.model || '').trim(), powertrain, icon, iconExplicit: hasCustomIcon, trackerType: 'car', status: 'Parked', statusClass: 'status-parked', location: 'Awaiting first location · just now', speed: '—', km: '0.0 km', last: 'Just added', source: deviceLink ? 'Connected mobile GPS' : 'Setup required', capabilities: ['Vehicle profile'] };
+      if (deviceLink) {
+        data.deviceLinks.forEach(link => { if (link.vehicleId === vehicle.id || link.id === deviceLink.id) link.vehicleId = link.id === deviceLink.id ? vehicle.id : null; });
+        vehicle.source = 'Connected mobile GPS';
+      }
+      data.vehicles.push(vehicle); audit(data, `Added ${vehicle.name} (${vehicle.id})${deviceLink ? ` and connected ${deviceLink.phone}` : ''} to the workspace.`); await writeData(data); return send(res, 201, { ...vehicle, connectedDeviceId: deviceLink?.id || null });
     }
 
     const vehicleMatch = pathname.match(/^\/api\/vehicles\/([^/]+)$/);
