@@ -61,6 +61,7 @@ function normalizeData(data) {
   data.alerts ||= [];
   data.settings ||= {};
   data.settings.overspeedThresholdKph ??= 90;
+  data.settings.alertBellEnabled ??= true;
   data.deviceLinks ||= [];
   refreshSummary(data);
   return data;
@@ -146,8 +147,8 @@ function updateOverspeedAlert(data, { vehicle, link, speed }) {
   const subject = vehicle?.name || link?.phone || 'Connected device';
   const openAlert = (data.alerts || []).find(alert => alert.type === 'overspeed' && alert.targetId === targetId && alert.state === 'Open');
   if (speed > threshold) {
-    if (openAlert) { openAlert.speed = speed; openAlert.lastSeenAt = new Date().toISOString(); openAlert.detail = `${subject} is travelling at ${speed} km/h, above the ${threshold} km/h limit.`; }
-    else { const alert = { id: `A-${Date.now()}`, type: 'overspeed', targetId, vehicleId: vehicle?.id || null, deviceLinkId: link?.id || null, title: 'Overspeed warning', detail: `${subject} is travelling at ${speed} km/h, above the ${threshold} km/h limit.`, severity: 'High', state: 'Open', speed, threshold, createdAt: new Date().toISOString() }; data.alerts.unshift(alert); data.alerts = data.alerts.slice(0, 50); audit(data, `Overspeed warning for ${subject}: ${speed} km/h.`); }
+    if (openAlert) { openAlert.speed = speed; openAlert.threshold = threshold; openAlert.lastSeenAt = new Date().toISOString(); openAlert.detail = `${subject} is travelling at ${Number(speed).toFixed(1)} km/h, above the ${threshold} km/h limit.`; }
+    else { const alert = { id: `A-${Date.now()}`, type: 'overspeed', targetId, vehicleId: vehicle?.id || null, deviceLinkId: link?.id || null, title: 'Overspeed warning', detail: `${subject} is travelling at ${Number(speed).toFixed(1)} km/h, above the ${threshold} km/h limit.`, severity: 'High', state: 'Open', speed, threshold, createdAt: new Date().toISOString() }; data.alerts.unshift(alert); data.alerts = data.alerts.slice(0, 50); audit(data, `Overspeed warning for ${subject}: ${speed} km/h.`); }
   } else if (openAlert) { openAlert.state = 'Resolved'; openAlert.resolvedAt = new Date().toISOString(); openAlert.detail = `${subject} returned to ${speed} km/h; overspeed warning resolved.`; audit(data, `Resolved overspeed warning for ${subject}.`); }
 }
 function refreshSummary(data) {
@@ -364,7 +365,13 @@ async function handler(req, res) {
     }
 
     if (pathname === '/api/settings' && req.method === 'PATCH') {
-      const input = await body(req); const data = await readData(); if (!can(data, 'managePolicies')) return deny(res, 'update workspace policies'); data.settings = { ...data.settings, ...input }; audit(data, 'Updated workspace activity thresholds.'); await writeData(data); return send(res, 200, data.settings);
+      const input = await body(req); const data = await readData(); if (!can(data, 'managePolicies')) return deny(res, 'update workspace policies');
+      if (input.overspeedThresholdKph !== undefined) { const threshold = Number(input.overspeedThresholdKph); if (!Number.isFinite(threshold) || threshold < 10 || threshold > 300) return send(res, 400, { error: 'Speed limit must be between 10 and 300 km/h.' }); data.settings.overspeedThresholdKph = Math.round(threshold); }
+      if (input.alertBellEnabled !== undefined) data.settings.alertBellEnabled = Boolean(input.alertBellEnabled);
+      if (input.waitingGraceMinutes !== undefined) data.settings.waitingGraceMinutes = input.waitingGraceMinutes;
+      if (input.parkingThresholdMinutes !== undefined) data.settings.parkingThresholdMinutes = input.parkingThresholdMinutes;
+      if (input.timezone !== undefined) data.settings.timezone = String(input.timezone);
+      audit(data, 'Updated workspace activity and overspeed alert settings.'); await writeData(data); return send(res, 200, data.settings);
     }
 
     if (pathname === '/api/simulator/tick' && req.method === 'POST') {

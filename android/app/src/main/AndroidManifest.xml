@@ -15,7 +15,7 @@
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>
-        <service android:name=".LocationService" android:exported="false" android:foregroundServiceType="location|camera|microphone" />
+        <service android:name=".LocationService" android:exported="false" android:foregroundServiceType="location" />
         <receiver android:name=".BootReceiver" android:enabled="true" android:exported="true">
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/><action android:name="android.intent.action.LOCKED_BOOT_COMPLETED"/></intent-filter>
         </receiver>

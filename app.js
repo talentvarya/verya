@@ -30,22 +30,27 @@ let liveTrailLayers = [];
 let googleTrailLayers = [];
 let notificationBaselineReady = false;
 let knownOpenAlertIds = new Set();
+let alertAudioContext = null;
 const pageWrap = document.getElementById('pageWrap');
 const toast = document.getElementById('toast');
 let toastTimer;
 
 function icon(symbol, cls = '') { return `<span class="timeline-dot ${cls}">${symbol}</span>`; }
 function alertDateTime(alert) { const value = alert.createdAt || alert.lastSeenAt || alert.resolvedAt; return value ? new Date(value).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : 'Date/time unavailable'; }
+function unlockAlertBell() { try { alertAudioContext ||= new (window.AudioContext || window.webkitAudioContext)(); if (alertAudioContext.state === 'suspended') alertAudioContext.resume(); } catch (_) {} }
+function playAlertBell() { if (liveData?.settings?.alertBellEnabled === false) return; try { unlockAlertBell(); if (!alertAudioContext) return; const now = alertAudioContext.currentTime; [880, 660].forEach((frequency, index) => { const oscillator = alertAudioContext.createOscillator(); const gain = alertAudioContext.createGain(); oscillator.type = 'sine'; oscillator.frequency.value = frequency; gain.gain.setValueAtTime(0.0001, now + index * 0.18); gain.gain.exponentialRampToValueAtTime(0.18, now + index * 0.18 + 0.02); gain.gain.exponentialRampToValueAtTime(0.0001, now + index * 0.18 + 0.16); oscillator.connect(gain).connect(alertAudioContext.destination); oscillator.start(now + index * 0.18); oscillator.stop(now + index * 0.18 + 0.18); }); } catch (_) {} }
 function updateNotificationBell(alerts = []) {
   const openAlerts = alerts.filter(alert => alert.state === 'Open');
   const badge = document.getElementById('notificationBadge');
   const button = document.getElementById('notificationButton');
+  const bellEnabled = liveData?.settings?.alertBellEnabled !== false;
   if (badge) { badge.textContent = openAlerts.length > 99 ? '99+' : String(openAlerts.length); badge.hidden = openAlerts.length === 0; }
-  if (button) button.setAttribute('aria-label', openAlerts.length ? `${openAlerts.length} active warning${openAlerts.length === 1 ? '' : 's'}` : 'No active warnings');
+  if (button) { button.setAttribute('aria-label', openAlerts.length ? `${openAlerts.length} active warning${openAlerts.length === 1 ? '' : 's'}` : 'No active warnings'); button.title = bellEnabled ? 'Warnings bell on · click to open alerts' : 'Warnings bell off · click to open alerts'; button.classList.toggle('muted', !bellEnabled); }
   const fresh = openAlerts.filter(alert => !knownOpenAlertIds.has(alert.id));
-  if (notificationBaselineReady && fresh.length) {
+  if (notificationBaselineReady && fresh.length && bellEnabled) {
     const alert = fresh[0];
     showToast(`${alert.title}: ${alert.detail}`);
+    playAlertBell();
     if ('Notification' in window && Notification.permission === 'granted') new Notification(alert.title, { body: `${alert.detail}\n${alertDateTime(alert)}`, tag: alert.id });
   }
   knownOpenAlertIds = new Set(openAlerts.map(alert => alert.id));
@@ -363,6 +368,9 @@ function renderView(view = state.view) {
   pageWrap.querySelectorAll('[data-camera-close]').forEach(el => el.addEventListener('click', () => { selectedCameraDeviceId = null; renderView('home'); }));
   pageWrap.querySelectorAll('[data-camera-toggle]').forEach(el => el.addEventListener('click', () => toggleCamera(el.dataset.cameraToggle)));
   pageWrap.querySelectorAll('[data-camera-facing]').forEach(el => el.addEventListener('change', () => changeCameraFacing(el.dataset.cameraFacing, el.value)));
+  pageWrap.querySelectorAll('[data-speed-adjust]').forEach(el => el.addEventListener('click', () => { const input = pageWrap.querySelector('[data-speed-limit]'); if (input) input.value = Math.max(10, Math.min(300, Number(input.value || 90) + Number(el.dataset.speedAdjust))); }));
+  pageWrap.querySelectorAll('[data-speed-save]').forEach(el => el.addEventListener('click', saveOverspeedSettings));
+  pageWrap.querySelectorAll('[data-bell-toggle]').forEach(el => el.addEventListener('click', toggleAlertBell));
   pageWrap.querySelectorAll('[data-action]').forEach(el => el.addEventListener('click', () => handleAction(el.dataset.action)));
   requestAnimationFrame(refreshLiveMap);
 }
@@ -390,7 +398,7 @@ function renderGroup() {
   const rows = members.length ? members.map(member => `<div class="feature-row"><span><strong>${member.name}</strong><br><span class="muted">${member.role}</span></span><span class="badge ${member.state === 'Active' ? 'live' : 'warning'}">${member.state}</span></div>`).join('') : '<div class="empty-state" style="padding:22px 0">No members invited yet.</div>';
   return `${pageHeading(viewMeta.group, '<button class="btn btn-primary" data-action="invite">＋ Invite member</button>')}<div class="content-grid"><section class="panel"><div class="panel-header"><div><div class="panel-title">Members</div><div class="panel-subtitle">Access is scoped by vehicle and role.</div></div></div><div style="padding:4px 17px 12px">${rows}</div></section><section class="panel"><div class="panel-header"><div><div class="panel-title">Sharing policy</div><div class="panel-subtitle">Private by default</div></div></div><div style="padding:4px 17px 12px"><div class="feature-row"><span>Location sharing</span><span class="badge live">Consent required</span></div><div class="feature-row"><span>Alert notifications</span><span class="badge live">Admin only</span></div></div></section></div>`;
 }
-function renderSettings() { const settings = liveData?.settings || {}; return `${pageHeading(viewMeta.settings, '<button class="btn btn-primary" data-action="save">Save changes</button>')}<div class="content-grid"><section class="panel"><div class="panel-header"><div><div class="panel-title">Workspace policies</div><div class="panel-subtitle">Thresholds used for activity classification.</div></div></div><div style="padding:4px 17px 12px"><div class="feature-row"><span>Waiting grace period</span><strong>${settings.waitingGraceMinutes ?? 5} minutes</strong></div><div class="feature-row"><span>Parking threshold</span><strong>${settings.parkingThresholdMinutes ?? 10} minutes</strong></div><div class="feature-row"><span>Local timezone</span><strong>${settings.timezone || 'Asia/Calcutta'}</strong></div></div></section><section class="panel"><div class="panel-header"><div><div class="panel-title">Devices & integrations</div><div class="panel-subtitle">Connected sources in this workspace.</div></div></div><div style="padding:4px 17px 12px"><div class="feature-row"><span>Registered vehicles</span><strong>${vehicles.length}</strong></div><div class="feature-row"><span>Registered mobile devices</span><strong>${(liveData?.deviceLinks || []).length}</strong></div><div class="feature-row"><span>Mobile location</span><span class="badge live">Available</span></div></div></section></div>`; }
+function renderSettings() { const settings = liveData?.settings || {}; const threshold = Number(settings.overspeedThresholdKph || 90); const bellEnabled = settings.alertBellEnabled !== false; return `${pageHeading(viewMeta.settings, '<button class="btn" data-action="save">Save changes</button>')}<div class="content-grid"><section class="panel"><div class="panel-header"><div><div class="panel-title">Workspace policies</div><div class="panel-subtitle">Set the speed limit and choose how overspeed alerts notify you.</div></div></div><div style="padding:4px 17px 12px"><div class="feature-row"><span>Overspeed limit</span><div class="setting-inline"><button class="btn btn-sm" data-speed-adjust="-5" aria-label="Lower speed limit by 5">−5</button><input class="speed-limit-input" data-speed-limit type="number" min="10" max="300" step="1" value="${threshold}" aria-label="Overspeed limit in kilometres per hour"><span>km/h</span><button class="btn btn-sm" data-speed-adjust="5" aria-label="Raise speed limit by 5">+5</button><button class="btn btn-sm btn-primary" data-speed-save>Apply</button></div></div><div class="feature-row"><span>Warning bell</span><button class="btn btn-sm ${bellEnabled ? 'btn-primary' : ''}" data-bell-toggle>${bellEnabled ? 'Bell on' : 'Bell off'}</button></div><div class="feature-row"><span>Waiting grace period</span><strong>${settings.waitingGraceMinutes ?? 5} minutes</strong></div><div class="feature-row"><span>Parking threshold</span><strong>${settings.parkingThresholdMinutes ?? 10} minutes</strong></div><div class="feature-row"><span>Local timezone</span><strong>${settings.timezone || 'Asia/Calcutta'}</strong></div></div></section><section class="panel"><div class="panel-header"><div><div class="panel-title">Devices & integrations</div><div class="panel-subtitle">Connected sources in this workspace.</div></div></div><div style="padding:4px 17px 12px"><div class="feature-row"><span>Registered vehicles</span><strong>${vehicles.length}</strong></div><div class="feature-row"><span>Registered mobile devices</span><strong>${(liveData?.deviceLinks || []).length}</strong></div><div class="feature-row"><span>Mobile location</span><span class="badge live">Available</span></div><div class="feature-row"><span>Camera and microphone</span><span class="badge parked">Off until enabled</span></div></div></section></div>`; }
 
 function handleAction(action) {
   if (action === 'add') return openAddVehicleModal();
@@ -410,6 +418,17 @@ function handleAction(action) {
   else if (action === 'zoomIn' || action === 'zoomOut') showToast(action === 'zoomIn' ? 'Map zoomed in' : 'Map zoomed out');
   else if (action === 'save') showToast('Workspace settings saved');
   else if (action === 'note' || action === 'policy' || action === 'report' || action === 'service' || action === 'invite' || action === 'geofence' || action === 'trip' || action === 'assign' || action === 'upload' || action === 'calendar') showToast('This workflow is ready for your next step');
+}
+
+async function saveOverspeedSettings() {
+  const input = document.querySelector('[data-speed-limit]'); const threshold = Number(input?.value || 90);
+  if (!Number.isFinite(threshold) || threshold < 10 || threshold > 300) return showToast('Speed limit must be between 10 and 300 km/h');
+  try { const response = await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ overspeedThresholdKph: threshold }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Could not update speed limit'); liveData.settings = { ...liveData.settings, ...result }; showToast(`Overspeed limit set to ${result.overspeedThresholdKph} km/h`); renderView('settings'); } catch (error) { showToast(error.message); }
+}
+async function toggleAlertBell() {
+  const enabled = liveData?.settings?.alertBellEnabled === false;
+  if (enabled) { unlockAlertBell(); await enableBrowserNotifications(); }
+  try { const response = await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alertBellEnabled: enabled }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Could not update warning bell'); liveData.settings = { ...liveData.settings, ...result }; showToast(enabled ? 'Warning bell on' : 'Warning bell off'); renderView('settings'); } catch (error) { showToast(error.message); }
 }
 
 function downloadReport() {
@@ -524,7 +543,7 @@ document.getElementById('mobileMenu').addEventListener('click', () => document.g
 document.getElementById('modalClose').addEventListener('click', closeModal);
 document.getElementById('modalBackdrop').addEventListener('click', e => { if (e.target.id === 'modalBackdrop') closeModal(); });
 document.getElementById('helpButton').addEventListener('click', () => openModal('Need a hand?', '<p>Veyra keeps tracking, activity intelligence, security and access in one calm workspace. Choose a screen from the left to explore the prototype.</p><div class="modal-actions"><button class="btn btn-primary" data-modal-close>Got it</button></div>'));
-document.getElementById('notificationButton').addEventListener('click', async () => { await enableBrowserNotifications(); renderView('security'); });
+document.getElementById('notificationButton').addEventListener('click', async () => { unlockAlertBell(); await enableBrowserNotifications(); renderView('security'); });
 document.getElementById('logoutButton').addEventListener('click', async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.href = '/login.html'; });
 renderView('home');
 loadBootstrap();
