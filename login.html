@@ -13,7 +13,7 @@
       <div class="brand-mark"><span></span><span></span><span></span></div>
       <p class="eyebrow">VEYRA · VEHICLE INTELLIGENCE</p>
       <h1 id="formTitle">Sign in to your fleet</h1>
-      <p class="intro">Use your admin account to view vehicles, devices and live locations.</p>
+      <p class="intro">Admin accounts open the fleet workspace. Group members must enter their Group Code to open the correct family or fleet dashboard.</p>
       <div class="auth-tabs" role="tablist">
         <button class="tab active" id="loginTab" type="button">Sign in</button>
         <button class="tab" id="signupTab" type="button">Create account</button>
@@ -21,6 +21,7 @@
       <form id="authForm">
         <label>Email<input id="email" name="email" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
         <label>Password<input id="password" name="password" type="password" autocomplete="current-password" minlength="8" required placeholder="At least 8 characters" /></label>
+        <label>Group Code <span class="optional">(members only)</span><input id="groupCode" name="groupCode" type="text" autocomplete="one-time-code" placeholder="e.g. VYR-12AB34" /></label>
         <button class="primary" id="submitButton" type="submit">Sign in</button>
       </form>
       <p class="message" id="message" role="status"></p>

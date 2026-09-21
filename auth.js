@@ -24,7 +24,7 @@ form.addEventListener('submit', async event => {
   event.preventDefault();
   message.textContent = '';
   submitButton.disabled = true;
-  const payload = { email: document.getElementById('email').value.trim(), password: document.getElementById('password').value };
+  const payload = { email: document.getElementById('email').value.trim(), password: document.getElementById('password').value, groupCode: document.getElementById('groupCode').value.trim() };
   try {
     const response = await fetch(`/api/auth/${mode}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const result = await response.json();

@@ -42,6 +42,8 @@ const initialData = {
   vehicles: [],
   alerts: [],
   members: [],
+  groups: [],
+  groupMembers: [],
   audit: [],
   settings: { waitingGraceMinutes: 5, parkingThresholdMinutes: 10, overspeedThresholdKph: 90, timezone: 'Asia/Calcutta' },
   session: { user: '', role: 'owner', workspace: 'Fleet workspace' },
@@ -68,6 +70,8 @@ function normalizeData(data) {
   data.settings.alertBellEnabled ??= true;
   data.alertPolicies ||= {};
   data.deviceLinks ||= [];
+  data.groups ||= [];
+  data.groupMembers ||= [];
   data.dailyDistanceMeters ||= {};
   rebuildDailyDistance(data);
   refreshSummary(data);
@@ -89,6 +93,8 @@ async function supabaseAuthRequest(pathname, payload, options = {}) {
 function parseCookies(req) { return Object.fromEntries(String(req.headers.cookie || '').split(';').map(item => item.trim()).filter(Boolean).map(item => { const index = item.indexOf('='); return [index === -1 ? item : item.slice(0, index), index === -1 ? '' : decodeURIComponent(item.slice(index + 1))]; })); }
 function cookieOptions(maxAge) { return `Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`; }
 function authCookies(session) { return [`veyra_access_token=${encodeURIComponent(session.access_token)}; ${cookieOptions(Number(session.expires_in || 3600))}`, `veyra_refresh_token=${encodeURIComponent(session.refresh_token)}; ${cookieOptions(60 * 60 * 24 * 30)}`]; }
+function groupCookie(groupId) { return `veyra_group_id=${encodeURIComponent(groupId)}; ${cookieOptions(60 * 60 * 24 * 30)}`; }
+function clearGroupCookie() { return `veyra_group_id=; ${cookieOptions(0)}`; }
 async function authUser(req) {
   if (!SUPABASE_AUTH_ENABLED) return { id: 'local-dev', email: 'local@dev', role: 'owner' };
   const cookies = parseCookies(req); const token = cookies.veyra_access_token || String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
@@ -246,7 +252,41 @@ function body(req) { return new Promise((resolve, reject) => { let raw = ''; req
 function audit(data, action) { data.audit.unshift({ time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }), actor: 'Arjun Rao', action }); data.audit = data.audit.slice(0, 20); }
 function safeFile(urlPath) { const requested = urlPath === '/' ? '/index.html' : urlPath; const file = path.normalize(path.join(ROOT, requested)); return file === ROOT || file.startsWith(`${ROOT}${path.sep}`) ? file : null; }
 function permissions(role) { return { view: true, export: role !== 'driver', acknowledge: ['owner', 'responder'].includes(role), manageVehicles: role === 'owner', manageGroup: role === 'owner', managePolicies: role === 'owner', ingest: ['owner', 'driver'].includes(role) }; }
-function can(data, action) { return Boolean(permissions(data.session?.role || 'owner')[action]); }
+function groupCodeHash(code) { return crypto.createHash('sha256').update(String(code || '').trim().toUpperCase()).digest('hex'); }
+function createGroupCode() { return `VYR-${crypto.randomBytes(3).toString('hex').toUpperCase()}`; }
+function isAdmin(data, req) { return !SUPABASE_AUTH_ENABLED || req.authUser?.id === data.ownerUserId || (data.ownerUserId == null && data.session?.role === 'owner'); }
+function resolveAccess(data, req) {
+  const cookies = parseCookies(req);
+  const groupId = cookies.veyra_group_id;
+  const admin = isAdmin(data, req);
+  if (!groupId) return admin ? { isAdmin: true, role: 'owner', group: null } : { error: 'Group Code is required for this account.' };
+  const group = (data.groups || []).find(item => item.id === groupId && item.state !== 'Archived');
+  if (!group) return { error: 'This Group Code is invalid or inactive.' };
+  if (admin) return { isAdmin: true, role: 'owner', group };
+  const member = (data.groupMembers || []).find(item => item.groupId === group.id && (item.userId === req.authUser?.id || item.email === req.authUser?.email) && item.state === 'Active');
+  if (!member) return { error: 'This account is not approved for that group.' };
+  return { isAdmin: false, role: member.role === 'Driver' ? 'driver' : 'viewer', group, member };
+}
+function scopeDataForRequest(data, req) {
+  const access = req.accessContext;
+  if (!access || access.isAdmin) { data.session.role = 'owner'; return data; }
+  const scoped = JSON.parse(JSON.stringify(data));
+  const groupId = access.group.id;
+  const vehicleIds = new Set(scoped.vehicles.filter(item => item.groupId === groupId).map(item => item.id));
+  const deviceIds = new Set(scoped.deviceLinks.filter(item => item.groupId === groupId || vehicleIds.has(item.vehicleId)).map(item => item.id));
+  scoped.vehicles = scoped.vehicles.filter(item => vehicleIds.has(item.id));
+  scoped.deviceLinks = scoped.deviceLinks.filter(item => deviceIds.has(item.id));
+  scoped.events = scoped.events.filter(item => deviceIds.has(item.deviceLinkId) || vehicleIds.has(item.vehicleId));
+  scoped.alerts = scoped.alerts.filter(item => deviceIds.has(item.deviceLinkId) || vehicleIds.has(item.vehicleId) || deviceIds.has(item.targetId) || vehicleIds.has(item.targetId));
+  scoped.fuelRecords = scoped.fuelRecords.filter(item => vehicleIds.has(item.vehicleId));
+  scoped.maintenanceRecords = scoped.maintenanceRecords.filter(item => vehicleIds.has(item.vehicleId));
+  scoped.members = scoped.groupMembers.filter(item => item.groupId === groupId);
+  scoped.groups = [{ id: access.group.id, name: access.group.name, state: access.group.state }];
+  scoped.session = { ...scoped.session, role: access.role, workspace: access.group.name, groupId, groupName: access.group.name };
+  refreshSummary(scoped);
+  return scoped;
+}
+function can(data, action, req) { return Boolean(permissions(req?.accessContext?.role || data.session?.role || 'owner')[action]); }
 function deny(res, action) { return send(res, 403, { error: `Current role cannot ${action}. Switch to an authorized role first.` }); }
 
 async function handler(req, res) {
@@ -267,9 +307,24 @@ async function handler(req, res) {
     }
     if (pathname === '/api/auth/login' && req.method === 'POST') {
       if (!SUPABASE_AUTH_ENABLED) return send(res, 503, { error: 'Supabase Auth is not configured.' });
-      const input = await body(req); const email = String(input.email || '').trim().toLowerCase(); const password = String(input.password || '');
+      const input = await body(req); const email = String(input.email || '').trim().toLowerCase(); const password = String(input.password || ''); const requestedCode = String(input.groupCode || '').trim().toUpperCase();
       if (!email || !password) return send(res, 400, { error: 'Email and password are required.' });
-      try { const result = await supabaseAuthRequest('token?grant_type=password', { email, password }); return send(res, 200, { ok: true, user: { id: result.user?.id, email: result.user?.email } }, 'application/json; charset=utf-8', { 'Set-Cookie': authCookies(result) }); }
+      try {
+        const result = await supabaseAuthRequest('token?grant_type=password', { email, password });
+        const data = await readData();
+        if (!data.ownerUserId) { data.ownerUserId = result.user?.id || null; data.ownerEmail = email; await writeData(data); }
+        const admin = result.user?.id === data.ownerUserId;
+        let selectedGroup = null;
+        if (requestedCode) {
+          selectedGroup = (data.groups || []).find(group => group.codeHash === groupCodeHash(requestedCode) && group.state !== 'Archived');
+          if (!selectedGroup) return send(res, 403, { error: 'Invalid Group Code.' });
+          const member = (data.groupMembers || []).find(item => item.groupId === selectedGroup.id && item.email === email && item.state === 'Active');
+          if (!admin && !member) return send(res, 403, { error: 'This email is not approved for that group.' });
+          if (member && !member.userId) { member.userId = result.user?.id || null; await writeData(data); }
+        } else if (!admin) return send(res, 403, { error: 'Enter your Group Code to open your group dashboard.' });
+        const cookies = [...authCookies(result), selectedGroup ? groupCookie(selectedGroup.id) : clearGroupCookie()];
+        return send(res, 200, { ok: true, user: { id: result.user?.id, email: result.user?.email }, group: selectedGroup ? { id: selectedGroup.id, name: selectedGroup.name } : null }, 'application/json; charset=utf-8', { 'Set-Cookie': cookies });
+      }
       catch (error) { return send(res, 401, { error: 'Email or password is incorrect.' }); }
     }
     if (pathname === '/api/auth/refresh' && req.method === 'POST') {
@@ -279,16 +334,22 @@ async function handler(req, res) {
       try { const result = await supabaseAuthRequest('token?grant_type=refresh_token', { refresh_token: refreshToken }); return send(res, 200, { ok: true }, 'application/json; charset=utf-8', { 'Set-Cookie': authCookies(result) }); }
       catch { return send(res, 401, { error: 'Login session expired.' }); }
     }
-    if (pathname === '/api/auth/logout' && req.method === 'POST') return send(res, 200, { ok: true }, 'application/json; charset=utf-8', { 'Set-Cookie': [`veyra_access_token=; ${cookieOptions(0)}`, `veyra_refresh_token=; ${cookieOptions(0)}`] });
+    if (pathname === '/api/auth/logout' && req.method === 'POST') return send(res, 200, { ok: true }, 'application/json; charset=utf-8', { 'Set-Cookie': [`veyra_access_token=; ${cookieOptions(0)}`, `veyra_refresh_token=; ${cookieOptions(0)}`, clearGroupCookie()] });
     if (pathname === '/api/auth/me' && req.method === 'GET') { const user = await requireAuth(req, res); if (!user) return; return send(res, 200, { id: user.id, email: user.email }); }
 
     const publicApi = pathname === '/api/health' || pathname === '/api/phone/request' || pathname === '/api/phone/verify' || pathname === '/api/device/config' || pathname === '/api/ingest/position' || pathname === '/api/ingest/camera' || pathname === '/api/ingest/mic';
-    if (pathname.startsWith('/api/') && !publicApi) { const user = await requireAuth(req, res); if (!user) return; }
+    if (pathname.startsWith('/api/') && !publicApi) {
+      const user = await requireAuth(req, res); if (!user) return;
+      const accessData = await readData(); req.accessContext = resolveAccess(accessData, req);
+      if (req.accessContext.error) return send(res, 403, { error: req.accessContext.error });
+      if (!req.accessContext.isAdmin && req.method !== 'GET') return send(res, 403, { error: 'Group dashboards are read-only. Ask the Admin to change access.' });
+    }
 
     if (pathname === '/api/health' && req.method === 'GET') return send(res, 200, { ok: true, service: 'veyra-local-mvp', persistence: SUPABASE_ENABLED ? 'supabase' : 'local-json', time: new Date().toISOString() });
-    if (pathname === '/api/bootstrap' && req.method === 'GET') { const data = await readData(); data.session.user = req.authUser.email; data.session.email = req.authUser.email; return send(res, 200, { ...data, dailyReports: dailyDistanceReports(data), dailySpeedReports: dailySpeedReports(data), alertPolicies: data.alertPolicies, mapConfig: { provider: GOOGLE_MAPS_API_KEY ? 'google' : 'leaflet', googleMapsApiKey: GOOGLE_MAPS_API_KEY }, permissions: permissions(data.session.role) }); }
-    if (pathname === '/api/session' && req.method === 'GET') { const data = await readData(); data.session.user = req.authUser.email; data.session.email = req.authUser.email; return send(res, 200, { ...data.session, permissions: permissions(data.session.role) }); }
+    if (pathname === '/api/bootstrap' && req.method === 'GET') { const raw = await readData(); const data = scopeDataForRequest(raw, req); data.session.user = req.authUser.email; data.session.email = req.authUser.email; return send(res, 200, { ...data, dailyReports: dailyDistanceReports(data), dailySpeedReports: dailySpeedReports(data), alertPolicies: data.alertPolicies, mapConfig: { provider: GOOGLE_MAPS_API_KEY ? 'google' : 'leaflet', googleMapsApiKey: GOOGLE_MAPS_API_KEY }, permissions: permissions(data.session.role) }); }
+    if (pathname === '/api/session' && req.method === 'GET') { const data = scopeDataForRequest(await readData(), req); data.session.user = req.authUser.email; data.session.email = req.authUser.email; return send(res, 200, { ...data.session, permissions: permissions(data.session.role) }); }
     if (pathname === '/api/session' && req.method === 'PATCH') {
+      if (!req.accessContext.isAdmin) return deny(res, 'switch session roles');
       const input = await body(req); const role = String(input.role || '').toLowerCase();
       if (!['owner', 'viewer', 'driver', 'responder'].includes(role)) return send(res, 400, { error: 'Unsupported role.' });
       const data = await readData(); data.session.role = role; audit(data, `Switched demo session role to ${role}.`); await writeData(data); return send(res, 200, { ...data.session, permissions: permissions(role) });
@@ -388,9 +449,10 @@ async function handler(req, res) {
       const hasCustomIcon = Boolean(String(input.icon || '').trim());
       const icon = hasCustomIcon ? String(input.icon).trim().slice(0, 4) : (powertrain === 'EV' ? '⚡' : powertrain === 'CNG' ? '⛽' : '🚗');
       const vehicle = { id, registration: id, name: String(input.name).trim(), model: String(input.model || '').trim(), powertrain, icon, iconExplicit: hasCustomIcon, trackerType: 'car', status: 'Parked', statusClass: 'status-parked', location: 'Awaiting first location · just now', speed: '—', km: '0.0 km', last: 'Just added', source: deviceLink ? 'Connected mobile GPS' : 'Setup required', capabilities: ['Vehicle profile'] };
+      if (input.groupId && data.groups.some(group => group.id === input.groupId && group.state === 'Active')) vehicle.groupId = input.groupId;
       if (deviceLink) {
         data.deviceLinks.forEach(link => { if (link.vehicleId === vehicle.id || link.id === deviceLink.id) link.vehicleId = link.id === deviceLink.id ? vehicle.id : null; });
-        vehicle.source = 'Connected mobile GPS';
+        vehicle.source = 'Connected mobile GPS'; if (vehicle.groupId) deviceLink.groupId = vehicle.groupId;
       }
       data.vehicles.push(vehicle); audit(data, `Added ${vehicle.name} (${vehicle.id})${deviceLink ? ` and connected ${deviceLink.phone}` : ''} to the workspace.`); await writeData(data); return send(res, 201, { ...vehicle, connectedDeviceId: deviceLink?.id || null });
     }
@@ -410,9 +472,28 @@ async function handler(req, res) {
       alert.state = 'Acknowledged'; audit(data, `Acknowledged alert ${alert.id}: ${alert.title}`); await writeData(data); return send(res, 200, alert);
     }
 
+    if (pathname === '/api/groups' && req.method === 'GET') {
+      const data = await readData();
+      const groups = req.accessContext.isAdmin ? data.groups : data.groups.filter(group => group.id === req.accessContext.group.id);
+      return send(res, 200, groups.map(group => ({ ...group, codeHash: undefined, members: data.groupMembers.filter(member => member.groupId === group.id).length, vehicles: data.vehicles.filter(vehicle => vehicle.groupId === group.id).length })));
+    }
+    if (pathname === '/api/groups' && req.method === 'POST') {
+      const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'create groups'); const input = await body(req); const name = String(input.name || '').trim(); if (!name) return send(res, 400, { error: 'Group name is required.' });
+      let code = createGroupCode(); while (data.groups.some(group => group.codeHash === groupCodeHash(code))) code = createGroupCode();
+      const group = { id: `GR-${Date.now()}`, name, code, codeHash: groupCodeHash(code), ownerUserId: req.authUser.id, state: 'Active', createdAt: new Date().toISOString() };
+      data.groups.push(group); audit(data, `Created group ${name}.`); await writeData(data); return send(res, 201, { ...group, members: 0, vehicles: 0 });
+    }
+    if (pathname === '/api/groups/assign' && req.method === 'POST') {
+      const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'assign group access'); const input = await body(req); const group = data.groups.find(item => item.id === input.groupId && item.state === 'Active'); if (!group) return send(res, 404, { error: 'Group not found.' });
+      const targetType = input.targetType === 'device' ? 'device' : 'vehicle'; const target = targetType === 'device' ? data.deviceLinks.find(item => item.id === input.targetId) : data.vehicles.find(item => item.id === input.targetId); if (!target) return send(res, 404, { error: 'Device or vehicle not found.' }); target.groupId = group.id; if (targetType === 'vehicle') data.deviceLinks.filter(item => item.vehicleId === target.id).forEach(item => { item.groupId = group.id; }); audit(data, `Assigned ${target.name || target.phone || target.id} to ${group.name}.`); await writeData(data); return send(res, 200, { ok: true, groupId: group.id, targetId: target.id });
+    }
     if (pathname === '/api/group/invite' && req.method === 'POST') {
-      const data = await readData(); if (!can(data, 'manageGroup')) return deny(res, 'invite members'); const input = await body(req); if (!input.name) return send(res, 400, { error: 'Name is required.' });
-      const member = { name: String(input.name).trim(), role: input.role || 'Household member', scope: input.scope || 'Selected vehicles', state: 'Pending' }; data.members.push(member); audit(data, `Invited ${member.name} as ${member.role}.`); await writeData(data); return send(res, 201, member);
+      const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'invite members'); const input = await body(req); if (!input.name) return send(res, 400, { error: 'Name is required.' });
+      const group = input.groupId ? data.groups.find(item => item.id === input.groupId && item.state === 'Active') : null;
+      if (input.groupId && !group) return send(res, 404, { error: 'Group not found.' });
+      if (group && !String(input.email || '').trim()) return send(res, 400, { error: 'Email is required for group access.' });
+      const member = { id: `GM-${Date.now()}`, name: String(input.name).trim(), email: String(input.email || '').trim().toLowerCase() || null, groupId: group?.id || null, role: input.role || 'Household member', scope: input.scope || 'Selected vehicles', state: group ? 'Active' : 'Pending', invitedAt: new Date().toISOString() };
+      data.members.push(member); if (group) data.groupMembers.push(member); audit(data, `Invited ${member.name} to ${group?.name || 'the workspace'} as ${member.role}.`); await writeData(data); return send(res, 201, member);
     }
 
     if (pathname === '/api/settings' && req.method === 'PATCH') {
