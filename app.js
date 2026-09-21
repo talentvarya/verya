@@ -593,9 +593,12 @@ async function removeDevice(deviceId) {
 }
 
 function openMoveDeviceModal(deviceId) {
-  const groups = (liveData?.groups || []).map(group => `<option value="${group.id}">${group.name}${group.code ? ` · ${group.code}` : ''}</option>`).join('');
+  const groups = (liveData?.groups || []).map(group => `<option value="${group.id}" data-group-code="${group.code || ''}">${group.name}${group.code ? ` · ${group.code}` : ''}</option>`).join('');
   if (!groups) return showToast('Create a group first.');
   openModal('Move registered phone to a group', `<p>Enter the target Group Code to verify the move. The connected vehicle will move with this phone.</p><form id="moveDeviceForm" class="modal-form"><label>Target group<select name="groupId" required>${groups}</select></label><label>Group Code<input name="groupCode" required placeholder="e.g. VYR-12AB34" autocomplete="one-time-code" /></label><div class="modal-actions"><button type="button" class="btn" data-modal-close>Cancel</button><button class="btn btn-primary" type="submit">Shift phone</button></div></form>`);
+  const groupSelect = document.querySelector('#moveDeviceForm select[name="groupId"]'); const groupCodeInput = document.querySelector('#moveDeviceForm input[name="groupCode"]');
+  groupSelect?.addEventListener('change', () => { groupCodeInput.value = groupSelect.selectedOptions[0]?.dataset.groupCode || ''; });
+  groupSelect?.dispatchEvent(new Event('change'));
   document.getElementById('moveDeviceForm').addEventListener('submit', async event => { event.preventDefault(); const payload = Object.fromEntries(new FormData(event.currentTarget)); const response = await fetch(`/api/device-links/${encodeURIComponent(deviceId)}/group`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); const result = await response.json(); if (!response.ok) return showToast(result.error); closeModal(); showToast(`Phone shifted to ${result.groupName}`); await loadBootstrap(); renderView('home'); });
 }
 async function resetMemberPassword(memberId) {
