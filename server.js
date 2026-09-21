@@ -90,6 +90,19 @@ async function supabaseAuthRequest(pathname, payload, options = {}) {
   if (!response.ok) throw new Error(result.msg || result.error_description || result.error || `Supabase Auth request failed (${response.status})`);
   return result;
 }
+async function supabaseAdminAuthRequest(pathname, payload, options = {}) {
+  if (!SUPABASE_ENABLED) throw new Error('Supabase server credentials are not configured.');
+  const response = await fetch(`${SUPABASE_URL}/auth/v1/${pathname}`, { method: options.method || 'POST', headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'User-Agent': 'veyra-server/1.0', 'Content-Type': 'application/json', ...(options.headers || {}) }, body: options.method === 'GET' ? undefined : JSON.stringify(payload || {}) });
+  const text = await response.text(); let result = {}; try { result = text ? JSON.parse(text) : {}; } catch { result = { error: text }; }
+  if (!response.ok) throw new Error(result.msg || result.error_description || result.error || `Supabase Admin Auth request failed (${response.status})`);
+  return result;
+}
+function validEmail(email) { return /^\S+@\S+\.\S+$/.test(String(email || '').trim()); }
+function temporaryPassword() { return `Veyra-${crypto.randomBytes(6).toString('base64url')}`; }
+async function createManagedAuthUser(email, password, name) {
+  const result = await supabaseAdminAuthRequest('admin/users', { email, password, email_confirm: true, user_metadata: { name } });
+  return result.user || result;
+}
 function parseCookies(req) { return Object.fromEntries(String(req.headers.cookie || '').split(';').map(item => item.trim()).filter(Boolean).map(item => { const index = item.indexOf('='); return [index === -1 ? item : item.slice(0, index), index === -1 ? '' : decodeURIComponent(item.slice(index + 1))]; })); }
 function cookieOptions(maxAge) { return `Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`; }
 function authCookies(session) { return [`veyra_access_token=${encodeURIComponent(session.access_token)}; ${cookieOptions(Number(session.expires_in || 3600))}`, `veyra_refresh_token=${encodeURIComponent(session.refresh_token)}; ${cookieOptions(60 * 60 * 24 * 30)}`]; }
@@ -478,10 +491,17 @@ async function handler(req, res) {
       return send(res, 200, groups.map(group => { const { code, codeHash, ...visible } = group; return { ...visible, members: data.groupMembers.filter(member => member.groupId === group.id).length, vehicles: data.vehicles.filter(vehicle => vehicle.groupId === group.id).length }; }));
     }
     if (pathname === '/api/groups' && req.method === 'POST') {
-      const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'create groups'); const input = await body(req); const name = String(input.name || '').trim(); const registrationType = ['individual', 'family', 'fleet'].includes(String(input.registrationType || '').toLowerCase()) ? String(input.registrationType).toLowerCase() : 'individual'; if (!name) return send(res, 400, { error: 'Group name is required.' });
+      const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'create groups'); const input = await body(req); const name = String(input.name || '').trim(); const registeredEmail = String(input.email || '').trim().toLowerCase(); const requestedPassword = String(input.password || ''); const registrationType = ['individual', 'family', 'fleet'].includes(String(input.registrationType || '').toLowerCase()) ? String(input.registrationType).toLowerCase() : 'individual'; if (!name) return send(res, 400, { error: 'Group name is required.' });
+      if (!validEmail(registeredEmail)) return send(res, 400, { error: 'Registered email is required.' });
+      if (requestedPassword && requestedPassword.length < 8) return send(res, 400, { error: 'Initial password must be at least 8 characters.' });
+      if (!SUPABASE_ENABLED || !SUPABASE_AUTH_ENABLED) return send(res, 503, { error: 'Supabase Auth is not configured for managed member accounts.' });
+      const initialPassword = requestedPassword || temporaryPassword();
+      let managedUser;
+      try { managedUser = await createManagedAuthUser(registeredEmail, initialPassword, name); } catch (error) { return send(res, 400, { error: error.message }); }
       let code = createGroupCode(); while (data.groups.some(group => group.codeHash === groupCodeHash(code))) code = createGroupCode();
-      const group = { id: `GR-${Date.now()}`, name, registrationType, codeHash: groupCodeHash(code), ownerUserId: req.authUser.id, ownerEmail: req.authUser.email, state: 'Active', createdAt: new Date().toISOString() };
-      data.groups.push(group); audit(data, `Registered ${registrationType} group ${name}.`); await writeData(data); return send(res, 201, { ...group, code, members: 0, vehicles: 0 });
+      const group = { id: `GR-${Date.now()}`, name, registrationType, codeHash: groupCodeHash(code), ownerUserId: managedUser.id || null, ownerEmail: registeredEmail, state: 'Active', createdAt: new Date().toISOString() };
+      const member = { id: `GM-${Date.now()}`, userId: managedUser.id || null, name, email: registeredEmail, groupId: group.id, role: registrationType === 'fleet' ? 'Fleet owner' : 'Household member', scope: 'All vehicles', state: 'Active', invitedAt: new Date().toISOString() };
+      data.groups.push(group); data.members.push(member); data.groupMembers.push(member); audit(data, `Registered ${registrationType} group ${name} for ${registeredEmail}.`); await writeData(data); return send(res, 201, { ...group, code, registeredEmail, initialPassword, members: 1, vehicles: 0 });
     }
     if (pathname === '/api/groups/assign' && req.method === 'POST') {
       const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'assign group access'); const input = await body(req); const group = data.groups.find(item => item.id === input.groupId && item.state === 'Active'); if (!group) return send(res, 404, { error: 'Group not found.' });
@@ -491,9 +511,18 @@ async function handler(req, res) {
       const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'invite members'); const input = await body(req); if (!input.name) return send(res, 400, { error: 'Name is required.' });
       const group = input.groupId ? data.groups.find(item => item.id === input.groupId && item.state === 'Active') : null;
       if (input.groupId && !group) return send(res, 404, { error: 'Group not found.' });
-      if (group && !String(input.email || '').trim()) return send(res, 400, { error: 'Email is required for group access.' });
-      const member = { id: `GM-${Date.now()}`, name: String(input.name).trim(), email: String(input.email || '').trim().toLowerCase() || null, groupId: group?.id || null, role: input.role || 'Household member', scope: input.scope || 'Selected vehicles', state: group ? 'Active' : 'Pending', invitedAt: new Date().toISOString() };
-      data.members.push(member); if (group) data.groupMembers.push(member); audit(data, `Invited ${member.name} to ${group?.name || 'the workspace'} as ${member.role}.`); await writeData(data); return send(res, 201, member);
+      const email = String(input.email || '').trim().toLowerCase(); const requestedPassword = String(input.password || '');
+      if (group && !email) return send(res, 400, { error: 'Email is required for group access.' });
+      if (group && !validEmail(email)) return send(res, 400, { error: 'Enter a valid member email.' });
+      if (group && requestedPassword && requestedPassword.length < 8) return send(res, 400, { error: 'Initial password must be at least 8 characters.' });
+      let managedUser = null; let initialPassword = null;
+      if (group) {
+        if (!SUPABASE_ENABLED || !SUPABASE_AUTH_ENABLED) return send(res, 503, { error: 'Supabase Auth is not configured for managed member accounts.' });
+        initialPassword = requestedPassword || temporaryPassword();
+        try { managedUser = await createManagedAuthUser(email, initialPassword, String(input.name).trim()); } catch (error) { return send(res, 400, { error: error.message }); }
+      }
+      const member = { id: `GM-${Date.now()}`, userId: managedUser?.id || null, name: String(input.name).trim(), email: email || null, groupId: group?.id || null, role: input.role || 'Household member', scope: input.scope || 'Selected vehicles', state: group ? 'Active' : 'Pending', invitedAt: new Date().toISOString() };
+      data.members.push(member); if (group) data.groupMembers.push(member); audit(data, `Invited ${member.name} to ${group?.name || 'the workspace'} as ${member.role}.`); await writeData(data); return send(res, 201, { ...member, initialPassword });
     }
 
     if (pathname === '/api/settings' && req.method === 'PATCH') {
