@@ -478,10 +478,10 @@ async function handler(req, res) {
       return send(res, 200, groups.map(group => { const { code, codeHash, ...visible } = group; return { ...visible, members: data.groupMembers.filter(member => member.groupId === group.id).length, vehicles: data.vehicles.filter(vehicle => vehicle.groupId === group.id).length }; }));
     }
     if (pathname === '/api/groups' && req.method === 'POST') {
-      const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'create groups'); const input = await body(req); const name = String(input.name || '').trim(); if (!name) return send(res, 400, { error: 'Group name is required.' });
+      const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'create groups'); const input = await body(req); const name = String(input.name || '').trim(); const registrationType = ['individual', 'family', 'fleet'].includes(String(input.registrationType || '').toLowerCase()) ? String(input.registrationType).toLowerCase() : 'individual'; if (!name) return send(res, 400, { error: 'Group name is required.' });
       let code = createGroupCode(); while (data.groups.some(group => group.codeHash === groupCodeHash(code))) code = createGroupCode();
-      const group = { id: `GR-${Date.now()}`, name, codeHash: groupCodeHash(code), ownerUserId: req.authUser.id, state: 'Active', createdAt: new Date().toISOString() };
-      data.groups.push(group); audit(data, `Created group ${name}.`); await writeData(data); return send(res, 201, { ...group, code, members: 0, vehicles: 0 });
+      const group = { id: `GR-${Date.now()}`, name, registrationType, codeHash: groupCodeHash(code), ownerUserId: req.authUser.id, ownerEmail: req.authUser.email, state: 'Active', createdAt: new Date().toISOString() };
+      data.groups.push(group); audit(data, `Registered ${registrationType} group ${name}.`); await writeData(data); return send(res, 201, { ...group, code, members: 0, vehicles: 0 });
     }
     if (pathname === '/api/groups/assign' && req.method === 'POST') {
       const data = await readData(); if (!req.accessContext.isAdmin) return deny(res, 'assign group access'); const input = await body(req); const group = data.groups.find(item => item.id === input.groupId && item.state === 'Active'); if (!group) return send(res, 404, { error: 'Group not found.' });
