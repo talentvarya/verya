@@ -1,4 +1,4 @@
-const CACHE_NAME = 'veyra-shell-v1';
+const CACHE_NAME = 'veyra-shell-v2';
 const APP_SHELL = ['/', '/index.html', '/device.html', '/styles.css', '/app.js', '/device.css', '/device.js', '/manifest.json', '/icon.svg'];
 
 self.addEventListener('install', event => {

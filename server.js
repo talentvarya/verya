@@ -46,6 +46,7 @@ const initialData = {
   settings: { waitingGraceMinutes: 5, parkingThresholdMinutes: 10, overspeedThresholdKph: 90, timezone: 'Asia/Calcutta' },
   session: { user: '', role: 'owner', workspace: 'Fleet workspace' },
   geofences: [],
+  fuelRecords: [],
   events: []
 };
 
@@ -58,6 +59,7 @@ function normalizeData(data) {
   data.session ||= { user: 'Arjun Rao', role: 'owner', workspace: 'Home garage' };
   data.geofences ||= [{ id: 'G-001', name: 'Home garage', type: 'Home', status: 'Active' }];
   data.events ||= [];
+  data.fuelRecords ||= [];
   data.alerts ||= [];
   data.settings ||= {};
   data.settings.overspeedThresholdKph ??= 90;
@@ -352,6 +354,10 @@ async function handler(req, res) {
       const data = await readData(); if (!can(data, 'managePolicies')) return deny(res, 'manage geofences');
       const input = await body(req); if (!input.name) return send(res, 400, { error: 'Geofence name is required.' });
       const geofence = { id: `G-${String(Date.now()).slice(-5)}`, name: String(input.name).trim(), type: input.type || 'Custom', status: 'Active' }; data.geofences.push(geofence); audit(data, `Created geofence ${geofence.name}.`); await writeData(data); return send(res, 201, geofence);
+    }
+
+    if (pathname === '/api/fuel' && req.method === 'POST') {
+      const data = await readData(); if (!can(data, 'manageVehicles')) return deny(res, 'add fuel records'); const input = await body(req); const liters = Number(input.liters); const cost = Number(input.cost); if (!input.vehicleId || !Number.isFinite(liters) || liters <= 0 || !Number.isFinite(cost) || cost < 0) return send(res, 400, { error: 'Vehicle, litres and a valid cost are required.' }); const vehicle = data.vehicles.find(item => item.id === input.vehicleId); if (!vehicle) return send(res, 404, { error: 'Vehicle not found.' }); const record = { id: `F-${Date.now()}`, vehicleId: vehicle.id, date: input.date || new Date().toISOString().slice(0, 10), liters: Number(liters.toFixed(2)), cost: Number(cost.toFixed(2)), odometer: input.odometer ? Number(input.odometer) : null, createdAt: new Date().toISOString() }; data.fuelRecords.unshift(record); data.fuelRecords = data.fuelRecords.slice(0, 500); audit(data, `Added fuel record for ${vehicle.name}.`); await writeData(data); return send(res, 201, record);
     }
 
     if (pathname === '/api/vehicles' && req.method === 'POST') {

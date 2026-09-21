@@ -94,6 +94,9 @@ button { cursor: pointer; }
 .report-field-option { display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: #fbfdfe; font-size: 10px; }
 .report-field-option input { accent-color: var(--teal); }
 .report-select-all { margin-top: 10px; background: #effaf7; border-color: #cdebe5; font-weight: 800; }
+.report-action-card { position: relative; }
+.report-action-card .btn { margin-top: 13px; }
+.report-action-card:hover { border-color: var(--teal); transform: translateY(-1px); transition: .18s ease; }
 @media (max-width: 640px) { .report-field-grid { grid-template-columns: 1fr; } }
 .notification-glyph { display: block; line-height: 1; font-size: 17px; }.notification-badge { position: absolute; top: -3px; right: -5px; min-width: 16px; height: 16px; padding: 0 4px; display: grid; place-items: center; border: 2px solid #fff; border-radius: 999px; color: #fff; background: var(--red); font-size: 8px; font-weight: 800; line-height: 1; }.notification-badge[hidden] { display: none; }
 .mic-live-status { display: block; margin-top: 7px; color: var(--teal-dark); font-size: 10px; font-weight: 800; }.mic-live-status[hidden] { display: none; }
